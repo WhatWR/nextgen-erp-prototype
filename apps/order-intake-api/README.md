@@ -43,10 +43,14 @@ The demo merchant and catalog are seeded automatically. Open
 | POST | `/api/reviews/{id}/approve` | Approve and create write-back artifacts |
 | POST | `/api/reviews/{id}/reject` | Reject a draft |
 | GET | `/api/audit?merchant_id=demo` | Audit feed |
+| GET/POST | `/api/integrations/line` | Read or save masked LINE OA configuration |
+| POST | `/api/integrations/line/test` | Self-test request-signature verification |
 | POST | `/webhooks/line` | Signature-verified LINE webhook |
 
-LINE webhook processing is disabled unless `LINE_CHANNEL_SECRET` is set. The raw
-request body is verified before JSON parsing.
+LINE webhook processing is disabled until the integration is configured and
+enabled. The raw request body is verified before JSON parsing. The local
+prototype stores the secret in a permission-restricted file; production must
+use a managed secrets vault.
 
 ## Tests
 

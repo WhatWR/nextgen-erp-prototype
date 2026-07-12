@@ -14,6 +14,7 @@ layerâ€”LINE intake, Thai catalog matching, exception handling and human reviewâ
 - CSV/XLSX catalog ingestion with automatic header-row and column detection.
 - Controlled CSV write-back plus a non-executed ERPClaw request payload.
 - ERPClaw Web review workspace at `/order-intake`.
+- Guided LINE OA connection and webhook setup at `/integrations`.
 - Pinned ERPClaw core and UI submodules with their original histories and licences.
 
 ## Quick start
@@ -24,6 +25,11 @@ python3 scripts/dev.py
 ```
 
 Then open [http://127.0.0.1:5173/order-intake](http://127.0.0.1:5173/order-intake).
+
+To connect a LINE Official Account, open
+[http://127.0.0.1:5173/integrations](http://127.0.0.1:5173/integrations), enter the
+Messaging API Channel ID and Channel Secret, then copy the webhook URL into
+LINE Developers. A public launch URL must use HTTPS.
 
 The demo message is pre-filled. Create a draft, inspect the matched lines and
 confidence, then approve or reject it. Approval creates artifacts under

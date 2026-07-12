@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .line import verify_line_signature
+from .line_integration import LineIntegrationStore
 from .service import (
     ConflictError,
     NotFoundError,
@@ -22,7 +23,10 @@ REVIEW_RE = re.compile(r"^/api/reviews/(?P<draft_id>[^/]+)$")
 DECISION_RE = re.compile(r"^/api/reviews/(?P<draft_id>[^/]+)/(?P<action>approve|reject)$")
 
 
-def build_handler(service: OrderIntakeService):
+def build_handler(service: OrderIntakeService, line_integration: LineIntegrationStore | None = None):
+    line_integration = line_integration or LineIntegrationStore(
+        service.db.path.parent / "line_integration.json"
+    )
     class Handler(BaseHTTPRequestHandler):
         server_version = "NextGenOrderIntake/0.1"
 
@@ -59,6 +63,9 @@ def build_handler(service: OrderIntakeService):
                 if parsed.path == "/api/audit":
                     merchant_id = self._query_value(query, "merchant_id", "demo")
                     self._json({"events": service.list_audit(merchant_id)})
+                    return
+                if parsed.path == "/api/integrations/line":
+                    self._json(line_integration.status())
                     return
                 match = REVIEW_RE.match(parsed.path)
                 if match:
@@ -100,6 +107,12 @@ def build_handler(service: OrderIntakeService):
                             str(body.get("merchant_id") or "demo"), filename, content
                         )
                     )
+                    return
+                if parsed.path == "/api/integrations/line":
+                    self._json(line_integration.save(body))
+                    return
+                if parsed.path == "/api/integrations/line/test":
+                    self._json(line_integration.test())
                     return
                 match = DECISION_RE.match(parsed.path)
                 if match:
@@ -143,7 +156,10 @@ def build_handler(service: OrderIntakeService):
 
         def _handle_line_webhook(self) -> None:
             body = self._raw_body()
-            secret = os.environ.get("LINE_CHANNEL_SECRET", "")
+            if not line_integration.webhook_enabled():
+                self._json({"error": "line_integration_disabled"}, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            secret = line_integration.secret()
             signature = self.headers.get("X-Line-Signature", "")
             if not verify_line_signature(body, signature, secret):
                 self._json({"error": "invalid_line_signature"}, HTTPStatus.UNAUTHORIZED)
@@ -156,7 +172,7 @@ def build_handler(service: OrderIntakeService):
                     continue
                 source = event.get("source") or {}
                 result = service.create_from_message(
-                    merchant_id=os.environ.get("LINE_MERCHANT_ID", "demo"),
+                    merchant_id=line_integration.merchant_id(),
                     customer_ref=None,
                     text=str(message.get("text") or ""),
                     idempotency_key=str(event.get("webhookEventId") or message.get("id") or ""),
