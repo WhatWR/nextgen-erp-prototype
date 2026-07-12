@@ -93,6 +93,31 @@ class ServiceTest(unittest.TestCase):
         )
         self.assertEqual(draft["items"][0]["sku"], "X-1")
 
+    def test_erpclaw_sync_replaces_demo_inventory_source(self) -> None:
+        initial = self.service.catalog("demo")
+        self.assertEqual(initial["source"], "demo")
+        self.assertIn("DRK-M150", {product["sku"] for product in initial["products"]})
+
+        result = self.service.sync_erpclaw_catalog(
+            "demo",
+            [
+                {
+                    "erpclaw_item_id": "erp-item-water",
+                    "sku": "ERP-WATER",
+                    "name": "น้ำดื่ม ERPClaw",
+                    "uom": "ลัง",
+                    "price": "110.00",
+                    "stock": "25.00",
+                    "item_group": "Finished Goods",
+                }
+            ],
+        )
+        self.assertEqual(result["source"], "erpclaw")
+        synced = self.service.catalog("demo")
+        self.assertEqual(synced["source"], "erpclaw")
+        self.assertEqual([product["sku"] for product in synced["products"]], ["ERP-WATER"])
+        self.assertEqual(synced["products"][0]["stock"], "25.00")
+
     def test_line_signature_uses_raw_body(self) -> None:
         body = b'{"events":[]}'
         secret = "line-secret"

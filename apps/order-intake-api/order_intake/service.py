@@ -352,6 +352,78 @@ class OrderIntakeService:
             )
         return {"merchant_id": merchant_id, "filename": filename, **metadata}
 
+    def sync_erpclaw_catalog(
+        self, merchant_id: str, products: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        if not products:
+            raise ValidationError("ERPClaw returned no active inventory items")
+        with self.db.transaction() as conn:
+            merchant = conn.execute(
+                "SELECT id FROM merchant WHERE id = ?", (merchant_id,)
+            ).fetchone()
+            if not merchant:
+                raise NotFoundError(f"merchant '{merchant_id}' was not found")
+            conn.execute(
+                "UPDATE product SET active = 0 WHERE merchant_id = ?", (merchant_id,)
+            )
+            for product in products:
+                conn.execute(
+                    """
+                    INSERT INTO product(
+                        id, merchant_id, sku, name, aliases_json, uom, price,
+                        stock_qty, erpclaw_item_id, item_group, catalog_source, active
+                    ) VALUES (?, ?, ?, ?, '[]', ?, ?, ?, ?, ?, 'erpclaw', 1)
+                    ON CONFLICT(merchant_id, sku) DO UPDATE SET
+                        name = excluded.name,
+                        uom = excluded.uom,
+                        price = excluded.price,
+                        stock_qty = excluded.stock_qty,
+                        erpclaw_item_id = excluded.erpclaw_item_id,
+                        item_group = excluded.item_group,
+                        catalog_source = 'erpclaw',
+                        active = 1
+                    """,
+                    (
+                        new_id("prod"), merchant_id, product["sku"], product["name"],
+                        product["uom"], product["price"], product["stock"],
+                        product["erpclaw_item_id"], product.get("item_group"),
+                    ),
+                )
+            self._audit(
+                conn,
+                merchant_id=merchant_id,
+                event_type="erpclaw_catalog_synced",
+                actor="erpclaw-adapter",
+                details={"product_count": len(products)},
+            )
+        return {"merchant_id": merchant_id, "product_count": len(products), "source": "erpclaw"}
+
+    def catalog(self, merchant_id: str) -> dict[str, Any]:
+        with self.db.connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, sku, name, uom, price, stock_qty, erpclaw_item_id,
+                       item_group, catalog_source
+                FROM product
+                WHERE merchant_id = ? AND active = 1
+                ORDER BY name
+                """,
+                (merchant_id,),
+            ).fetchall()
+            products = [
+                {
+                    **dict(row),
+                    "cost": row["price"],
+                    "stock": row["stock_qty"],
+                    "group": row["item_group"] or (
+                        "ERPClaw Inventory" if row["catalog_source"] == "erpclaw" else "Demo Catalog"
+                    ),
+                }
+                for row in rows
+            ]
+            source = "erpclaw" if any(p["catalog_source"] == "erpclaw" for p in products) else "demo"
+            return {"products": products, "source": source, "count": len(products)}
+
     def list_reviews(
         self, merchant_id: str, status: str | None = None, limit: int = 100
     ) -> list[dict[str, Any]]:
@@ -807,7 +879,12 @@ class OrderIntakeService:
         items = [
             dict(item)
             for item in conn.execute(
-                "SELECT * FROM order_item WHERE draft_id = ? ORDER BY rowid", (draft_id,)
+                """
+                SELECT oi.*, p.erpclaw_item_id
+                FROM order_item oi LEFT JOIN product p ON p.id = oi.product_id
+                WHERE oi.draft_id = ? ORDER BY oi.rowid
+                """,
+                (draft_id,),
             ).fetchall()
         ]
         result = dict(row)

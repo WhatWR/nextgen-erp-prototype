@@ -12,6 +12,7 @@ from urllib.parse import parse_qs, urlparse
 from .line import verify_line_signature
 from .line_delivery import push_text
 from .line_integration import LineIntegrationStore
+from .erpclaw_integration import ERPClawIntegrationStore
 from .service import (
     ConflictError,
     NotFoundError,
@@ -27,9 +28,17 @@ WORKFLOW_RE = re.compile(
 )
 
 
-def build_handler(service: OrderIntakeService, line_integration: LineIntegrationStore | None = None):
+def build_handler(
+    service: OrderIntakeService,
+    line_integration: LineIntegrationStore | None = None,
+    erpclaw_integration: ERPClawIntegrationStore | None = None,
+):
     line_integration = line_integration or LineIntegrationStore(
         service.db.path.parent / "line_integration.json"
+    )
+    erpclaw_integration = erpclaw_integration or ERPClawIntegrationStore(
+        service.db.path.parent / "erpclaw_integration.json",
+        Path(__file__).resolve().parents[3] / "vendor" / "erpclaw",
     )
     class Handler(BaseHTTPRequestHandler):
         server_version = "NextGenOrderIntake/0.1"
@@ -70,6 +79,13 @@ def build_handler(service: OrderIntakeService, line_integration: LineIntegration
                     return
                 if parsed.path == "/api/integrations/line":
                     self._json(line_integration.status())
+                    return
+                if parsed.path == "/api/integrations/erpclaw":
+                    self._json(erpclaw_integration.status())
+                    return
+                if parsed.path == "/api/catalog":
+                    merchant_id = self._query_value(query, "merchant_id", "demo")
+                    self._json(service.catalog(merchant_id))
                     return
                 match = REVIEW_RE.match(parsed.path)
                 if match:
@@ -117,6 +133,16 @@ def build_handler(service: OrderIntakeService, line_integration: LineIntegration
                     return
                 if parsed.path == "/api/integrations/line/test":
                     self._json(line_integration.test())
+                    return
+                if parsed.path == "/api/integrations/erpclaw":
+                    self._json(erpclaw_integration.save(body))
+                    return
+                if parsed.path == "/api/integrations/erpclaw/sync":
+                    products = erpclaw_integration.fetch_catalog()
+                    result = service.sync_erpclaw_catalog(
+                        str(body.get("merchant_id") or "demo"), products
+                    )
+                    self._json({**result, "integration": erpclaw_integration.status()})
                     return
                 match = DECISION_RE.match(parsed.path)
                 if match:

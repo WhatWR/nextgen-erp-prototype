@@ -58,6 +58,10 @@ class HttpTest(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(health["status"], "ok")
 
+        _, catalog = self.request("/api/catalog?merchant_id=demo")
+        self.assertEqual(catalog["source"], "demo")
+        self.assertGreater(catalog["count"], 0)
+
         status, draft = self.request(
             "/api/intake/messages",
             "POST",

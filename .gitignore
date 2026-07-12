@@ -7,5 +7,6 @@ tmp/
 *.sqlite3-shm
 *.sqlite3-wal
 line_integration.json
+erpclaw_integration.json
 __pycache__/
 *.py[cod]

@@ -33,6 +33,9 @@ CREATE TABLE IF NOT EXISTS product (
     uom TEXT NOT NULL,
     price TEXT NOT NULL,
     stock_qty TEXT NOT NULL DEFAULT '0',
+    erpclaw_item_id TEXT,
+    item_group TEXT,
+    catalog_source TEXT NOT NULL DEFAULT 'demo',
     active INTEGER NOT NULL DEFAULT 1,
     UNIQUE (merchant_id, sku)
 );
@@ -136,6 +139,15 @@ class Database:
     def initialize(self) -> None:
         with self.connect() as conn:
             conn.executescript(SCHEMA)
+            columns = {row["name"] for row in conn.execute("PRAGMA table_info(product)")}
+            migrations = {
+                "erpclaw_item_id": "ALTER TABLE product ADD COLUMN erpclaw_item_id TEXT",
+                "item_group": "ALTER TABLE product ADD COLUMN item_group TEXT",
+                "catalog_source": "ALTER TABLE product ADD COLUMN catalog_source TEXT NOT NULL DEFAULT 'demo'",
+            }
+            for column, statement in migrations.items():
+                if column not in columns:
+                    conn.execute(statement)
 
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:

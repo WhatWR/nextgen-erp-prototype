@@ -31,6 +31,9 @@ The demo merchant and catalog are seeded automatically. Open
   exceptions. Customer confirmation is still mandatory.
 - Stock is reserved at Pick List submission. AI extraction never reduces stock;
   actual movement occurs through the Delivery Note lifecycle.
+- Product matching never reads a separate hard-coded inventory after ERPClaw is
+  connected. `list-items`, `get-projected-qty`, and optionally `get-item-price`
+  refresh the shared catalog used by both Order Intake and the Items screen.
 - The server binds to `127.0.0.1` by default. Set `ORDER_INTAKE_API_KEY` to
   require `X-Prototype-Key` for non-LINE endpoints.
 
@@ -42,6 +45,7 @@ The demo merchant and catalog are seeded automatically. Open
 | GET | `/api/dashboard?merchant_id=demo` | Prototype KPIs |
 | POST | `/api/demo/seed` | Reset or refresh demo data |
 | POST | `/api/catalog/import` | Base64-encoded CSV/XLSX catalog import |
+| GET | `/api/catalog?merchant_id=demo` | Shared Order Intake/Items catalog |
 | POST | `/api/intake/messages` | Create a controlled draft |
 | GET | `/api/reviews?merchant_id=demo` | Review queue |
 | GET/PATCH | `/api/reviews/{id}` | Read or correct a draft |
@@ -53,6 +57,8 @@ The demo merchant and catalog are seeded automatically. Open
 | GET | `/api/audit?merchant_id=demo` | Audit feed |
 | GET/POST | `/api/integrations/line` | Read or save masked LINE OA configuration |
 | POST | `/api/integrations/line/test` | Self-test request-signature verification |
+| GET/POST | `/api/integrations/erpclaw` | Read/save ERPClaw inventory connection |
+| POST | `/api/integrations/erpclaw/sync` | Synchronize ERPClaw items, price and stock |
 | POST | `/webhooks/line` | Signature-verified LINE webhook |
 
 LINE webhook processing is disabled until the integration is configured and

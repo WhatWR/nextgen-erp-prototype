@@ -20,6 +20,8 @@ layerâ€”LINE intake, Thai catalog matching, exception handling and human reviewâ
   human approval.
 - ERPClaw Sales Order, Pick List/reservation, Delivery Note, Sales Invoice and
   payment-allocation adapter with dry-run plans by default.
+- Shared inventory catalog: the Items page and Order Intake read one cache that
+  synchronizes item IDs, codes, units, prices, and projected stock from ERPClaw.
 - LINE confirmation, delivery, payment and invoice-status outbox with optional
   real push delivery using a Channel Access Token.
 - Pinned ERPClaw core and UI submodules with their original histories and licences.
@@ -37,6 +39,11 @@ To connect a LINE Official Account, open
 [http://127.0.0.1:5173/integrations](http://127.0.0.1:5173/integrations), enter the
 Messaging API Channel ID and Channel Secret, then copy the webhook URL into
 LINE Developers. A public launch URL must use HTTPS.
+
+The same Integrations page connects ERPClaw inventory. Provide the ERPClaw
+database, company, warehouse, and optional selling price list, then select
+**Synchronize inventory**. Once connected, demo-only items are deactivated and
+cannot be matched by Order Intake.
 
 The demo message is pre-filled. Create a draft, inspect the matched lines and
 confidence, then follow the customer-confirmation, delivery and payment buttons.

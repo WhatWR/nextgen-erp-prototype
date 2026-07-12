@@ -44,7 +44,7 @@ class ERPClawAdapter:
     def create_order_and_reserve(self, draft: dict[str, Any]) -> dict[str, Any]:
         items = [
             {
-                "item_id": item["sku"],
+                "item_id": item.get("erpclaw_item_id") or item["sku"],
                 "qty": item["quantity"],
                 "uom": item.get("uom"),
                 "rate": item["unit_price"],
@@ -89,7 +89,7 @@ class ERPClawAdapter:
                 "mark-picked",
                 **{
                     "pick-list": workflow["erpclaw_pick_list_id"],
-                    "item": item["sku"],
+                    "item": item.get("erpclaw_item_id") or item["sku"],
                     "picked-qty": item["quantity"],
                 },
             )
@@ -110,7 +110,7 @@ class ERPClawAdapter:
                     "mark-picked",
                     {
                         "pick-list": workflow["erpclaw_pick_list_id"],
-                        "item": item["sku"],
+                        "item": item.get("erpclaw_item_id") or item["sku"],
                         "picked-qty": item["quantity"],
                     },
                 )
@@ -244,12 +244,15 @@ class ERPClawAdapter:
             if value is None:
                 continue
             command.extend([f"--{name}", str(value)])
+        env = os.environ.copy()
+        env.setdefault("ERPCLAW_HOME", str(self.erpclaw_root / "scripts" / "erpclaw-setup"))
         completed = subprocess.run(
             command,
             capture_output=True,
             text=True,
             timeout=30,
             check=False,
+            env=env,
         )
         if completed.returncode != 0:
             raise RuntimeError(
