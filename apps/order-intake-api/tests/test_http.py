@@ -77,9 +77,25 @@ class HttpTest(unittest.TestCase):
             "POST",
             {"reviewer": "owner"},
         )
-        self.assertEqual(approved["status"], "approved")
+        self.assertEqual(approved["status"], "awaiting_customer_confirmation")
+        _, reserved = self.request(
+            f"/api/workflows/{draft['id']}/customer-confirm",
+            "POST",
+            {"confirmed": True},
+        )
+        self.assertEqual(reserved["status"], "reserved_for_pick")
+        _, delivered = self.request(
+            f"/api/workflows/{draft['id']}/delivery-complete", "POST", {}
+        )
+        self.assertEqual(delivered["status"], "awaiting_payment")
+        _, paid = self.request(
+            f"/api/workflows/{draft['id']}/payment-received",
+            "POST",
+            {"reference": "HTTP-PAY-1"},
+        )
+        self.assertEqual(paid["status"], "paid")
         _, dashboard = self.request("/api/dashboard?merchant_id=demo")
-        self.assertEqual(dashboard["metrics"]["approved"], 1)
+        self.assertEqual(dashboard["status_counts"]["paid"], 1)
 
     def test_line_integration_setup_test_and_webhook(self) -> None:
         _, initial = self.request("/api/integrations/line")

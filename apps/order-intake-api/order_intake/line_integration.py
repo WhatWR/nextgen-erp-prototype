@@ -25,6 +25,9 @@ class LineIntegrationStore:
         config = self._read()
         secret = str(config.get("channel_secret") or os.environ.get("LINE_CHANNEL_SECRET", ""))
         channel_id = str(config.get("channel_id") or os.environ.get("LINE_CHANNEL_ID", ""))
+        access_token = str(
+            config.get("channel_access_token") or os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+        )
         enabled = bool(config.get("enabled", False))
         webhook_url = str(config.get("webhook_url") or "http://127.0.0.1:8200/webhooks/line")
         return {
@@ -35,9 +38,11 @@ class LineIntegrationStore:
             "merchant_id": str(config.get("merchant_id") or os.environ.get("LINE_MERCHANT_ID", "demo")),
             "webhook_url": webhook_url,
             "secret_masked": self._mask(secret),
+            "access_token_configured": bool(access_token),
+            "access_token_masked": self._mask(access_token),
             "secret_source": "environment" if not config.get("channel_secret") and secret else "local_prototype",
             "updated_at": config.get("updated_at"),
-            "receive_only": True,
+            "receive_only": not bool(access_token),
         }
 
     def save(self, payload: dict) -> dict:
@@ -47,6 +52,9 @@ class LineIntegrationStore:
         webhook_url = str(payload.get("webhook_url") or "").strip()
         secret = str(payload.get("channel_secret") or "").strip() or str(
             current.get("channel_secret") or os.environ.get("LINE_CHANNEL_SECRET", "")
+        )
+        access_token = str(payload.get("channel_access_token") or "").strip() or str(
+            current.get("channel_access_token") or os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
         )
         enabled = bool(payload.get("enabled", False))
 
@@ -65,6 +73,7 @@ class LineIntegrationStore:
         config = {
             "channel_id": channel_id,
             "channel_secret": secret,
+            "channel_access_token": access_token,
             "merchant_id": merchant_id,
             "webhook_url": webhook_url,
             "enabled": enabled,
@@ -94,6 +103,12 @@ class LineIntegrationStore:
 
     def secret(self) -> str:
         return str(self._read().get("channel_secret") or os.environ.get("LINE_CHANNEL_SECRET", ""))
+
+    def access_token(self) -> str:
+        return str(
+            self._read().get("channel_access_token")
+            or os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
+        )
 
     def webhook_enabled(self) -> bool:
         return bool(self.status()["enabled"])

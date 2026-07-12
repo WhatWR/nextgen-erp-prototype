@@ -35,7 +35,9 @@ class ServiceTest(unittest.TestCase):
         self.assertTrue(first["created"])
         self.assertFalse(second["created"])
         self.assertEqual(first["id"], second["id"])
-        self.assertEqual(first["status"], "ready_for_review")
+        self.assertEqual(first["status"], "awaiting_customer_confirmation")
+        self.assertEqual(first["workflow"]["automation_mode"], "automatic")
+        self.assertEqual(first["outbound_messages"][0]["message_type"], "customer_confirmation")
         self.assertEqual([item["sku"] for item in first["items"]], ["DRK-RED-710", "NDL-MAMA-TOM"])
         self.assertEqual(first["total"], "1056.00")
 
@@ -54,19 +56,30 @@ class ServiceTest(unittest.TestCase):
         approved = self.service.approve_review(
             draft["id"], reviewer="owner", confirm_exceptions=True, note="ลูกค้ายืนยันรอของ"
         )
-        self.assertEqual(approved["status"], "approved")
-        self.assertFalse(approved["writeback"]["erpclaw_executed"])
+        self.assertEqual(approved["status"], "awaiting_customer_confirmation")
+        self.assertEqual(approved["workflow"]["automation_mode"], "human_review")
 
-    def test_approval_creates_csv_and_dry_run_payload(self) -> None:
+    def test_customer_confirmation_runs_full_dry_run_order_to_cash(self) -> None:
         draft = self.service.create_from_message(
             merchant_id="demo",
             customer_ref="C-002",
             text="น้ำดื่มขวดเล็ก 12 ลัง",
             idempotency_key="evt-approve-1",
         )
-        approved = self.service.approve_review(draft["id"], reviewer="ops@example.com")
-        self.assertTrue(Path(approved["writeback"]["csv"]).exists())
-        self.assertTrue(Path(approved["writeback"]["erpclaw_dry_run"]).exists())
+        self.assertEqual(draft["status"], "awaiting_customer_confirmation")
+        reserved = self.service.customer_confirmation(draft["id"], confirmed=True)
+        self.assertEqual(reserved["status"], "reserved_for_pick")
+        self.assertTrue(Path(reserved["erpclaw"]["plan"]).exists())
+        self.assertTrue(reserved["workflow"]["erpclaw_sales_order_id"].startswith("dry-so-"))
+
+        delivered = self.service.complete_delivery(draft["id"])
+        self.assertEqual(delivered["status"], "awaiting_payment")
+        self.assertTrue(delivered["workflow"]["erpclaw_sales_invoice_id"].startswith("dry-inv-"))
+
+        paid = self.service.record_payment(draft["id"], reference="PAY-001")
+        self.assertEqual(paid["status"], "paid")
+        self.assertTrue(paid["workflow"]["erpclaw_payment_id"].startswith("dry-pay-"))
+        self.assertEqual(paid["outbound_messages"][-1]["message_type"], "payment_received_invoice")
 
     def test_catalog_csv_detects_columns(self) -> None:
         csv_data = "รายงานสินค้า,,,\nรหัสสินค้า,ชื่อสินค้า,หน่วยนับ,ราคาขาย,คงเหลือ\nX-1,ปลากระป๋อง,ลัง,850 บาท,15\n".encode("utf-8-sig")

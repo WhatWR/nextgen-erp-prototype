@@ -81,10 +81,42 @@ CREATE TABLE IF NOT EXISTS audit_event (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS order_workflow (
+    draft_id TEXT PRIMARY KEY REFERENCES order_draft(id) ON DELETE CASCADE,
+    automation_mode TEXT NOT NULL,
+    confidence_threshold REAL NOT NULL,
+    customer_confirmation TEXT NOT NULL DEFAULT 'pending',
+    erpclaw_sales_order_id TEXT,
+    erpclaw_pick_list_id TEXT,
+    erpclaw_delivery_note_id TEXT,
+    erpclaw_sales_invoice_id TEXT,
+    erpclaw_payment_id TEXT,
+    last_error TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS outbound_message (
+    id TEXT PRIMARY KEY,
+    merchant_id TEXT NOT NULL,
+    draft_id TEXT REFERENCES order_draft(id) ON DELETE CASCADE,
+    channel TEXT NOT NULL,
+    recipient_ref TEXT,
+    message_type TEXT NOT NULL,
+    body TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'queued',
+    provider_message_id TEXT,
+    error TEXT,
+    created_at TEXT NOT NULL,
+    sent_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_draft_merchant_status
     ON order_draft(merchant_id, status, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_audit_merchant_created
     ON audit_event(merchant_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_outbound_status_created
+    ON outbound_message(status, created_at);
 """
 
 

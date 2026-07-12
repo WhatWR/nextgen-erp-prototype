@@ -12,6 +12,7 @@ from .adapters import ControlledWriteback
 from .catalog import parse_catalog
 from .db import Database
 from .matching import ProductCandidate, normalize_thai, parse_order_lines
+from .workflow import AutomationPolicy, ERPClawAdapter
 
 
 BANGKOK = ZoneInfo("Asia/Bangkok")
@@ -50,6 +51,8 @@ class OrderIntakeService:
         self.db = Database(db_path)
         self.db.initialize()
         self.writeback = ControlledWriteback(export_dir)
+        self.policy = AutomationPolicy()
+        self.erpclaw = ERPClawAdapter(export_dir)
 
     def seed_demo(self, reset: bool = False) -> dict[str, Any]:
         created_at = now_iso()
@@ -213,7 +216,13 @@ class OrderIntakeService:
             confidence = round(
                 (sum(line_confidences) + customer_confidence) / (len(line_confidences) + 1), 4
             )
-            status = "needs_review" if exception_reasons or confidence < 0.92 else "ready_for_review"
+            auto_qualified = self.policy.qualifies(
+                confidence, exception_reasons, customer["id"] if customer else None
+            )
+            status = "awaiting_customer_confirmation" if auto_qualified else (
+                "needs_review" if exception_reasons or confidence < self.policy.confidence_threshold
+                else "ready_for_review"
+            )
             draft_id = new_id("ord")
             timestamp = now_iso()
 
@@ -281,6 +290,22 @@ class OrderIntakeService:
                 actor=source_channel,
                 details={"confidence": confidence, "exceptions": exception_reasons},
             )
+            self._create_workflow(
+                conn,
+                draft_id,
+                automation_mode="automatic" if auto_qualified else "human_review",
+            )
+            if auto_qualified:
+                draft_for_message = self._serialize_draft(conn, draft_id)
+                self._queue_confirmation(conn, draft_for_message, actor="confidence_policy")
+                self._audit(
+                    conn,
+                    merchant_id=merchant_id,
+                    draft_id=draft_id,
+                    event_type="auto_routed_to_customer_confirmation",
+                    actor="confidence_policy",
+                    details={"threshold": self.policy.confidence_threshold, "confidence": confidence},
+                )
             result = self._serialize_draft(conn, draft_id)
             result["created"] = True
             return result
@@ -430,9 +455,9 @@ class OrderIntakeService:
             row = conn.execute("SELECT * FROM order_draft WHERE id = ?", (draft_id,)).fetchone()
             if not row:
                 raise NotFoundError(f"draft '{draft_id}' was not found")
-            if row["status"] == "approved":
+            if row["status"] in {"awaiting_customer_confirmation", "reserved_for_pick", "awaiting_payment", "paid"}:
                 result = self._serialize_draft(conn, draft_id)
-                result["writeback"] = {"already_approved": True}
+                result["writeback"] = {"already_approved": True, "next_gate": row["status"]}
                 return result
             if row["status"] == "rejected":
                 raise ConflictError("a rejected draft cannot be approved")
@@ -444,23 +469,230 @@ class OrderIntakeService:
             conn.execute(
                 """
                 UPDATE order_draft
-                SET status = 'approved', reviewer = ?, decision_note = ?, updated_at = ?
+                SET status = 'awaiting_customer_confirmation', reviewer = ?, decision_note = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (reviewer, note, timestamp, draft_id),
             )
             draft = self._serialize_draft(conn, draft_id)
             writeback = self.writeback.write(draft)
+            self._queue_confirmation(conn, draft, actor=reviewer)
             self._audit(
                 conn,
                 merchant_id=row["merchant_id"],
                 draft_id=draft_id,
-                event_type="draft_approved",
+                event_type="human_approved_for_customer_confirmation",
                 actor=reviewer,
                 details={"note": note, "writeback": writeback},
             )
             draft["writeback"] = writeback
             return draft
+
+    def customer_confirmation(
+        self, draft_id: str, *, confirmed: bool, actor: str = "customer"
+    ) -> dict[str, Any]:
+        with self.db.connect() as conn:
+            draft = self._serialize_draft(conn, draft_id)
+            if draft["status"] != "awaiting_customer_confirmation":
+                raise ConflictError("order is not waiting for customer confirmation")
+        if not confirmed:
+            with self.db.transaction() as conn:
+                conn.execute(
+                    "UPDATE order_draft SET status = 'rejected', updated_at = ? WHERE id = ?",
+                    (now_iso(), draft_id),
+                )
+                conn.execute(
+                    "UPDATE order_workflow SET customer_confirmation = 'rejected', updated_at = ? WHERE draft_id = ?",
+                    (now_iso(), draft_id),
+                )
+                self._audit(
+                    conn,
+                    merchant_id=draft["merchant_id"],
+                    draft_id=draft_id,
+                    event_type="customer_rejected",
+                    actor=actor,
+                    details={},
+                )
+                return self._serialize_draft(conn, draft_id)
+
+        erp_result = self.erpclaw.create_order_and_reserve(draft)
+        timestamp = now_iso()
+        with self.db.transaction() as conn:
+            conn.execute(
+                "UPDATE order_draft SET status = 'reserved_for_pick', updated_at = ? WHERE id = ?",
+                (timestamp, draft_id),
+            )
+            conn.execute(
+                """
+                UPDATE order_workflow SET customer_confirmation = 'confirmed',
+                    erpclaw_sales_order_id = ?, erpclaw_pick_list_id = ?,
+                    last_error = NULL, updated_at = ? WHERE draft_id = ?
+                """,
+                (
+                    erp_result["sales_order_id"],
+                    erp_result["pick_list_id"],
+                    timestamp,
+                    draft_id,
+                ),
+            )
+            self._queue_message(
+                conn,
+                draft,
+                "order_confirmed",
+                f"ยืนยันออเดอร์แล้ว เลขที่ {erp_result['sales_order_id']} ทีมคลังกำลังจัดสินค้า",
+            )
+            self._audit(
+                conn,
+                merchant_id=draft["merchant_id"],
+                draft_id=draft_id,
+                event_type="customer_confirmed_order_reserved",
+                actor=actor,
+                details=erp_result,
+            )
+            result = self._serialize_draft(conn, draft_id)
+            result["erpclaw"] = erp_result
+            return result
+
+    def complete_delivery(self, draft_id: str, *, actor: str = "delivery-team") -> dict[str, Any]:
+        with self.db.connect() as conn:
+            draft = self._serialize_draft(conn, draft_id)
+            workflow = draft.get("workflow") or {}
+            if draft["status"] != "reserved_for_pick":
+                raise ConflictError("order must be reserved for picking before delivery completion")
+        erp_result = self.erpclaw.complete_delivery_and_invoice(draft, workflow)
+        timestamp = now_iso()
+        with self.db.transaction() as conn:
+            conn.execute(
+                "UPDATE order_draft SET status = 'awaiting_payment', updated_at = ? WHERE id = ?",
+                (timestamp, draft_id),
+            )
+            conn.execute(
+                """
+                UPDATE order_workflow SET erpclaw_delivery_note_id = ?,
+                    erpclaw_sales_invoice_id = ?, updated_at = ? WHERE draft_id = ?
+                """,
+                (
+                    erp_result["delivery_note_id"],
+                    erp_result["sales_invoice_id"],
+                    timestamp,
+                    draft_id,
+                ),
+            )
+            self._queue_message(
+                conn,
+                draft,
+                "delivery_completed",
+                f"จัดส่งออเดอร์แล้ว ยอดชำระ ฿{draft['total']} ใบแจ้งหนี้ {erp_result['sales_invoice_id']}",
+            )
+            self._audit(
+                conn,
+                merchant_id=draft["merchant_id"],
+                draft_id=draft_id,
+                event_type="delivery_completed_invoice_created",
+                actor=actor,
+                details=erp_result,
+            )
+            result = self._serialize_draft(conn, draft_id)
+            result["erpclaw"] = erp_result
+            return result
+
+    def record_payment(
+        self, draft_id: str, *, reference: str, actor: str = "payment-webhook"
+    ) -> dict[str, Any]:
+        if not reference:
+            raise ValidationError("payment reference is required")
+        with self.db.connect() as conn:
+            draft = self._serialize_draft(conn, draft_id)
+            workflow = draft.get("workflow") or {}
+            if draft["status"] != "awaiting_payment":
+                raise ConflictError("order is not awaiting payment")
+        erp_result = self.erpclaw.record_payment(draft, workflow, reference)
+        timestamp = now_iso()
+        with self.db.transaction() as conn:
+            conn.execute(
+                "UPDATE order_draft SET status = 'paid', updated_at = ? WHERE id = ?",
+                (timestamp, draft_id),
+            )
+            conn.execute(
+                "UPDATE order_workflow SET erpclaw_payment_id = ?, updated_at = ? WHERE draft_id = ?",
+                (erp_result["payment_id"], timestamp, draft_id),
+            )
+            self._queue_message(
+                conn,
+                draft,
+                "payment_received_invoice",
+                f"รับชำระเงินเรียบร้อย ขอบคุณค่ะ ใบกำกับ/ใบแจ้งหนี้เลขที่ {workflow['erpclaw_sales_invoice_id']}",
+            )
+            self._audit(
+                conn,
+                merchant_id=draft["merchant_id"],
+                draft_id=draft_id,
+                event_type="payment_allocated_invoice_sent",
+                actor=actor,
+                details={"reference": reference, **erp_result},
+            )
+            result = self._serialize_draft(conn, draft_id)
+            result["erpclaw"] = erp_result
+            return result
+
+    def handle_customer_reply(self, customer_ref: str, text: str) -> dict[str, Any] | None:
+        normalized = normalize_thai(text)
+        positive = {"ยืนยัน", "ตกลง", "โอเค", "ok", "confirm", "yes"}
+        negative = {"ยกเลิก", "ไม่เอา", "cancel", "no"}
+        if normalized not in positive | negative:
+            return None
+        with self.db.connect() as conn:
+            row = conn.execute(
+                """
+                SELECT id FROM order_draft
+                WHERE customer_ref = ? AND status = 'awaiting_customer_confirmation'
+                ORDER BY created_at DESC LIMIT 1
+                """,
+                (customer_ref,),
+            ).fetchone()
+        if not row:
+            return None
+        return self.customer_confirmation(
+            row["id"], confirmed=normalized in positive, actor=f"line:{customer_ref}"
+        )
+
+    def pending_outbound(self, draft_id: str) -> list[dict[str, Any]]:
+        with self.db.connect() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    """
+                    SELECT * FROM outbound_message
+                    WHERE draft_id = ? AND channel = 'line' AND status = 'queued'
+                    ORDER BY created_at
+                    """,
+                    (draft_id,),
+                ).fetchall()
+            ]
+
+    def mark_outbound(
+        self,
+        message_id: str,
+        *,
+        sent: bool,
+        provider_message_id: str | None = None,
+        error: str | None = None,
+    ) -> None:
+        with self.db.transaction() as conn:
+            conn.execute(
+                """
+                UPDATE outbound_message
+                SET status = ?, provider_message_id = ?, error = ?, sent_at = ?
+                WHERE id = ?
+                """,
+                (
+                    "sent" if sent else "failed",
+                    provider_message_id,
+                    error,
+                    now_iso() if sent else None,
+                    message_id,
+                ),
+            )
 
     def reject_review(
         self, draft_id: str, *, reviewer: str, note: str | None = None
@@ -581,7 +813,71 @@ class OrderIntakeService:
         result = dict(row)
         result["exception_reasons"] = json.loads(result.pop("exception_reasons_json") or "[]")
         result["items"] = items
+        workflow = conn.execute(
+            "SELECT * FROM order_workflow WHERE draft_id = ?", (draft_id,)
+        ).fetchone()
+        result["workflow"] = dict(workflow) if workflow else None
+        result["outbound_messages"] = [
+            dict(message)
+            for message in conn.execute(
+                "SELECT * FROM outbound_message WHERE draft_id = ? ORDER BY created_at",
+                (draft_id,),
+            ).fetchall()
+        ]
         return result
+
+    def _create_workflow(self, conn, draft_id: str, *, automation_mode: str) -> None:
+        timestamp = now_iso()
+        conn.execute(
+            """
+            INSERT INTO order_workflow(
+                draft_id, automation_mode, confidence_threshold,
+                customer_confirmation, created_at, updated_at
+            ) VALUES (?, ?, ?, 'pending', ?, ?)
+            """,
+            (draft_id, automation_mode, self.policy.confidence_threshold, timestamp, timestamp),
+        )
+
+    def _queue_confirmation(self, conn, draft: dict[str, Any], *, actor: str) -> None:
+        lines = "\n".join(
+            f"• {item['product_name']} {item['quantity']} {item.get('uom') or ''}"
+            for item in draft["items"]
+        )
+        body = (
+            f"กรุณายืนยันออเดอร์\n{lines}\nรวม ฿{draft['total']}\n"
+            "ตอบ ‘ยืนยัน’ เพื่อดำเนินการ หรือ ‘ยกเลิก’ เพื่อยกเลิกออเดอร์"
+        )
+        self._queue_message(conn, draft, "customer_confirmation", body)
+        self._audit(
+            conn,
+            merchant_id=draft["merchant_id"],
+            draft_id=draft["id"],
+            event_type="customer_confirmation_queued",
+            actor=actor,
+            details={"channel": draft["source_channel"]},
+        )
+
+    def _queue_message(
+        self, conn, draft: dict[str, Any], message_type: str, body: str
+    ) -> None:
+        conn.execute(
+            """
+            INSERT INTO outbound_message(
+                id, merchant_id, draft_id, channel, recipient_ref,
+                message_type, body, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?)
+            """,
+            (
+                new_id("msg"),
+                draft["merchant_id"],
+                draft["id"],
+                "line" if draft["source_channel"] == "line" else "simulator",
+                draft.get("customer_ref"),
+                message_type,
+                body,
+                now_iso(),
+            ),
+        )
 
     def _audit(
         self,

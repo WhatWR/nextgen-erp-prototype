@@ -15,6 +15,13 @@ layerâ€”LINE intake, Thai catalog matching, exception handling and human reviewâ
 - Controlled CSV write-back plus a non-executed ERPClaw request payload.
 - ERPClaw Web review workspace at `/order-intake`.
 - Guided LINE OA connection and webhook setup at `/integrations`.
+- Confidence-gated order-to-cash automation: 95%+ with no exceptions goes to
+  customer confirmation; every lower-confidence or exceptional order requires
+  human approval.
+- ERPClaw Sales Order, Pick List/reservation, Delivery Note, Sales Invoice and
+  payment-allocation adapter with dry-run plans by default.
+- LINE confirmation, delivery, payment and invoice-status outbox with optional
+  real push delivery using a Channel Access Token.
 - Pinned ERPClaw core and UI submodules with their original histories and licences.
 
 ## Quick start
@@ -32,8 +39,26 @@ Messaging API Channel ID and Channel Secret, then copy the webhook URL into
 LINE Developers. A public launch URL must use HTTPS.
 
 The demo message is pre-filled. Create a draft, inspect the matched lines and
-confidence, then approve or reject it. Approval creates artifacts under
-`apps/order-intake-api/data/exports/`; it does not execute an ERP action.
+confidence, then follow the customer-confirmation, delivery and payment buttons.
+ERPClaw command plans are created under `apps/order-intake-api/data/exports/`.
+They do not execute ERP actions until live execution is explicitly configured.
+
+## ERPClaw execution mode
+
+Dry-run is always the default. To use a prepared ERPClaw company, configure:
+
+```bash
+export ERPCLAW_EXECUTE=1
+export ERPCLAW_ROOT=/path/to/erpclaw
+export ERPCLAW_DB_PATH=/path/to/erpclaw.sqlite3
+export ERPCLAW_COMPANY_ID=your-company-id
+export ERPCLAW_WAREHOUSE_ID=your-warehouse-id
+export ERPCLAW_RECEIVABLE_ACCOUNT=your-receivable-account-id
+export ERPCLAW_BANK_ACCOUNT=your-bank-account-id
+```
+
+The intake customer references and catalog SKUs must map to ERPClaw customer
+and item IDs before enabling this mode. Test in a copied database first.
 
 If the web dependencies have not been installed:
 

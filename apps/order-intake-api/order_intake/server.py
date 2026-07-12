@@ -10,6 +10,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 from .line import verify_line_signature
+from .line_delivery import push_text
 from .line_integration import LineIntegrationStore
 from .service import (
     ConflictError,
@@ -21,6 +22,9 @@ from .service import (
 
 REVIEW_RE = re.compile(r"^/api/reviews/(?P<draft_id>[^/]+)$")
 DECISION_RE = re.compile(r"^/api/reviews/(?P<draft_id>[^/]+)/(?P<action>approve|reject)$")
+WORKFLOW_RE = re.compile(
+    r"^/api/workflows/(?P<draft_id>[^/]+)/(?P<action>customer-confirm|delivery-complete|payment-received)$"
+)
 
 
 def build_handler(service: OrderIntakeService, line_integration: LineIntegrationStore | None = None):
@@ -129,6 +133,29 @@ def build_handler(service: OrderIntakeService, line_integration: LineIntegration
                             match.group("draft_id"), reviewer=reviewer, note=body.get("note")
                         )
                     self._json(result)
+                    self._deliver_line_outbound(result["id"])
+                    return
+                workflow_match = WORKFLOW_RE.match(parsed.path)
+                if workflow_match:
+                    action = workflow_match.group("action")
+                    draft_id = workflow_match.group("draft_id")
+                    if action == "customer-confirm":
+                        result = service.customer_confirmation(
+                            draft_id,
+                            confirmed=bool(body.get("confirmed", False)),
+                            actor=str(body.get("actor") or "customer-simulator"),
+                        )
+                    elif action == "delivery-complete":
+                        result = service.complete_delivery(
+                            draft_id, actor=str(body.get("actor") or "delivery-team")
+                        )
+                    else:
+                        result = service.record_payment(
+                            draft_id,
+                            reference=str(body.get("reference") or ""),
+                            actor=str(body.get("actor") or "payment-webhook"),
+                        )
+                    self._json(result)
                     return
                 self._json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
             except Exception as exc:
@@ -171,15 +198,41 @@ def build_handler(service: OrderIntakeService, line_integration: LineIntegration
                 if event.get("type") != "message" or message.get("type") != "text":
                     continue
                 source = event.get("source") or {}
+                customer_ref = str(source.get("userId") or source.get("groupId") or "")
+                customer_reply = service.handle_customer_reply(
+                    customer_ref, str(message.get("text") or "")
+                )
+                if customer_reply:
+                    created.append(customer_reply["id"])
+                    self._deliver_line_outbound(customer_reply["id"])
+                    continue
                 result = service.create_from_message(
                     merchant_id=line_integration.merchant_id(),
-                    customer_ref=None,
+                    customer_ref=customer_ref or None,
                     text=str(message.get("text") or ""),
                     idempotency_key=str(event.get("webhookEventId") or message.get("id") or ""),
                     source_channel="line",
                 )
                 created.append(result["id"])
+                self._deliver_line_outbound(result["id"])
             self._json({"accepted": True, "draft_ids": created})
+
+        def _deliver_line_outbound(self, draft_id: str) -> None:
+            token = line_integration.access_token()
+            if not token:
+                return
+            for message in service.pending_outbound(draft_id):
+                try:
+                    provider_id = push_text(
+                        str(message.get("recipient_ref") or ""),
+                        str(message["body"]),
+                        token,
+                    )
+                    service.mark_outbound(
+                        message["id"], sent=True, provider_message_id=provider_id
+                    )
+                except Exception as exc:
+                    service.mark_outbound(message["id"], sent=False, error=str(exc))
 
         def _raw_body(self) -> bytes:
             length = int(self.headers.get("Content-Length", "0") or "0")
