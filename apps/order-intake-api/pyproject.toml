@@ -1,0 +1,11 @@
+[project]
+name = "nextgen-order-intake"
+version = "0.1.0"
+description = "Thailand-first, human-controlled order-intake prototype"
+requires-python = ">=3.11"
+
+[tool.unittest]
+start-directory = "tests"
+
+[tool.ruff]
+line-length = 100

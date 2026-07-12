@@ -1,0 +1,18 @@
+{
+  "generated_at": "2026-07-12",
+  "components": {
+    "erpclaw": {
+      "repository": "https://github.com/avansaber/erpclaw.git",
+      "commit": "4ae975868ba4de8a651905e2d87b6107ac0e88de",
+      "path": "vendor/erpclaw",
+      "license": "GPL-3.0"
+    },
+    "erpclaw-web": {
+      "repository": "https://github.com/avansaber/erpclaw-web.git",
+      "commit": "898ed5fd5945b4cbda7feaefc665b3dc6beb2fdc",
+      "path": "vendor/erpclaw-web",
+      "license": "GPL-3.0",
+      "local_branch": "nextgen-thailand"
+    }
+  }
+}

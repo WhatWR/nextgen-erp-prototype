@@ -1,0 +1,6 @@
+[submodule "vendor/erpclaw"]
+	path = vendor/erpclaw
+	url = https://github.com/avansaber/erpclaw.git
+[submodule "vendor/erpclaw-web"]
+	path = vendor/erpclaw-web
+	url = https://github.com/avansaber/erpclaw-web.git
