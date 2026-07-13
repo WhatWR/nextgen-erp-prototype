@@ -96,14 +96,14 @@ services:
         wait-for-it -t 120 redis-cache:6379;
         wait-for-it -t 120 redis-queue:6379;
         if [ ! -f "sites/$${SITE_NAME}/site_config.json" ]; then
-          bench new-site "$${SITE_NAME}"
-          --mariadb-user-host-login-scope='%'
-          --admin-password "$${ADMIN_PASSWORD}"
-          --db-root-username root
-          --db-root-password "$${DB_ROOT_PASSWORD}"
-          --install-app erpnext
-          --install-app nextgen_erp
-          --set-default;
+          bench new-site "$${SITE_NAME}" \
+            --mariadb-user-host-login-scope='%' \
+            --admin-password "$${ADMIN_PASSWORD}" \
+            --db-root-username root \
+            --db-root-password "$${DB_ROOT_PASSWORD}" \
+            --install-app erpnext \
+            --install-app nextgen_erp \
+            --set-default;
         else
           bench --site "$${SITE_NAME}" migrate;
         fi;
