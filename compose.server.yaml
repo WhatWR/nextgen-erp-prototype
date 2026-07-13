@@ -1,0 +1,222 @@
+name: ${COMPOSE_PROJECT_NAME:-nextgen-erp}
+
+x-erpnext-image: &erpnext-image
+  image: ${NEXTGEN_IMAGE:-nextgen-erp}:${NEXTGEN_TAG:-v16.20.0}
+  build:
+    context: .
+    dockerfile: docker/erpnext/Dockerfile
+    args:
+      ERPNEXT_VERSION: ${ERPNEXT_VERSION:-v16.20.0}
+  restart: unless-stopped
+
+x-backend: &backend
+  <<: *erpnext-image
+  volumes:
+    - sites:/home/frappe/frappe-bench/sites
+    - logs:/home/frappe/frappe-bench/logs
+  depends_on:
+    configurator:
+      condition: service_completed_successfully
+
+services:
+  db:
+    image: mariadb:11.8
+    restart: unless-stopped
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --skip-character-set-client-handshake
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD in .env.server}
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    volumes:
+      - db-data:/var/lib/mysql
+    networks: [internal]
+
+  redis-cache:
+    image: redis:6.2-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    networks: [internal]
+
+  redis-queue:
+    image: redis:6.2-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - redis-queue-data:/data
+    networks: [internal]
+
+  configurator:
+    <<: *erpnext-image
+    restart: "no"
+    entrypoint: ["bash", "-c"]
+    command:
+      - >-
+        ls -1 apps > sites/apps.txt;
+        bench set-config -g db_host db;
+        bench set-config -gp db_port 3306;
+        bench set-config -g redis_cache redis://redis-cache:6379;
+        bench set-config -g redis_queue redis://redis-queue:6379;
+        bench set-config -g redis_socketio redis://redis-queue:6379;
+        bench set-config -gp socketio_port 9000;
+        bench set-config -g chromium_path /usr/bin/chromium-headless-shell
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis-cache:
+        condition: service_healthy
+      redis-queue:
+        condition: service_healthy
+    networks: [internal]
+
+  create-site:
+    <<: *backend
+    restart: "no"
+    entrypoint: ["bash", "-c"]
+    command:
+      - >-
+        wait-for-it -t 120 db:3306;
+        wait-for-it -t 120 redis-cache:6379;
+        wait-for-it -t 120 redis-queue:6379;
+        if [ ! -f "sites/$${SITE_NAME}/site_config.json" ]; then
+          bench new-site "$${SITE_NAME}"
+          --mariadb-user-host-login-scope='%'
+          --admin-password "$${ADMIN_PASSWORD}"
+          --db-root-username root
+          --db-root-password "$${DB_ROOT_PASSWORD}"
+          --install-app erpnext
+          --install-app nextgen_erp
+          --set-default;
+        else
+          bench --site "$${SITE_NAME}" migrate;
+        fi;
+        bench --site "$${SITE_NAME}" set-config host_name "https://$${ERP_DOMAIN}"
+    environment:
+      SITE_NAME: ${SITE_NAME:?Set SITE_NAME in .env.server}
+      ERP_DOMAIN: ${ERP_DOMAIN:?Set ERP_DOMAIN in .env.server}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env.server}
+      DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD in .env.server}
+    networks: [internal]
+
+  backend:
+    <<: *backend
+    networks: [internal]
+
+  frontend:
+    <<: *erpnext-image
+    command: ["nginx-entrypoint.sh"]
+    environment:
+      BACKEND: backend:8000
+      SOCKETIO: websocket:9000
+      FRAPPE_SITE_NAME_HEADER: ${SITE_NAME:?Set SITE_NAME in .env.server}
+      UPSTREAM_REAL_IP_ADDRESS: 0.0.0.0/0
+      UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
+      UPSTREAM_REAL_IP_RECURSIVE: "on"
+      PROXY_READ_TIMEOUT: 120
+      CLIENT_MAX_BODY_SIZE: 50m
+    volumes:
+      - sites:/home/frappe/frappe-bench/sites
+      - logs:/home/frappe/frappe-bench/logs
+    depends_on:
+      backend:
+        condition: service_started
+      websocket:
+        condition: service_started
+      create-site:
+        condition: service_completed_successfully
+    networks: [internal]
+
+  websocket:
+    <<: *backend
+    command: ["node", "/home/frappe/frappe-bench/apps/frappe/socketio.js"]
+    networks: [internal]
+
+  queue-short:
+    <<: *backend
+    command: ["bench", "worker", "--queue", "short,default"]
+    networks: [internal]
+
+  queue-long:
+    <<: *backend
+    command: ["bench", "worker", "--queue", "long,default,short"]
+    networks: [internal]
+
+  scheduler:
+    <<: *backend
+    command: ["bench", "schedule"]
+    networks: [internal]
+
+  order-intake:
+    image: ${NEXTGEN_IMAGE:-nextgen-erp}-order-intake:${NEXTGEN_TAG:-v16.20.0}
+    build:
+      context: .
+      dockerfile: docker/order-intake/Dockerfile
+    restart: unless-stopped
+    environment:
+      ERPNEXT_URL: http://frontend:8080
+      ERPNEXT_API_KEY: ${ERPNEXT_API_KEY:-}
+      ERPNEXT_API_SECRET: ${ERPNEXT_API_SECRET:-}
+      ERPNEXT_WAREHOUSE: ${ERPNEXT_WAREHOUSE:?Set ERPNEXT_WAREHOUSE in .env.server}
+      ORDER_INTAKE_API_KEY: ${ORDER_INTAKE_API_KEY:?Set ORDER_INTAKE_API_KEY in .env.server}
+      ORDER_BACKEND: ${ORDER_BACKEND:-erpnext}
+      LINE_CONFIG_SOURCE: ${LINE_CONFIG_SOURCE:-erpnext}
+      LINE_WORKFLOW_BACKEND: ${LINE_WORKFLOW_BACKEND:-erpnext}
+      ERPCLAW_BACKEND: ${ERPCLAW_BACKEND:-erpnext}
+      ORDER_INTAKE_QUIET: "1"
+      ORDER_INTAKE_AUTO_SEED: "0"
+    depends_on:
+      create-site:
+        condition: service_completed_successfully
+      frontend:
+        condition: service_started
+    networks: [internal]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      ERP_DOMAIN: ${ERP_DOMAIN:?Set ERP_DOMAIN in .env.server}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env.server}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./docker/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      frontend:
+        condition: service_started
+      order-intake:
+        condition: service_healthy
+    networks: [internal]
+
+volumes:
+  db-data:
+  redis-queue-data:
+  sites:
+  logs:
+  caddy-data:
+  caddy-config:
+
+networks:
+  internal:
+    driver: bridge

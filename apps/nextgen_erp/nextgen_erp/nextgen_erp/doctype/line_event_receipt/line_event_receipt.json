@@ -1,0 +1,19 @@
+{
+ "autoname": "field:event_id",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["event_id", "line_id", "result_json"],
+ "fields": [
+  {"fieldname": "event_id", "fieldtype": "Data", "label": "LINE Event ID", "reqd": 1, "unique": 1},
+  {"fieldname": "line_id", "fieldtype": "Data", "label": "LINE Sender ID", "reqd": 1},
+  {"fieldname": "result_json", "fieldtype": "Long Text", "label": "Result", "read_only": 1}
+ ],
+ "module": "NextGen ERP",
+ "name": "LINE Event Receipt",
+ "permissions": [
+  {"create": 1, "read": 1, "role": "NextGen Order Service"},
+  {"create": 1, "read": 1, "role": "System Manager"}
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC"
+}

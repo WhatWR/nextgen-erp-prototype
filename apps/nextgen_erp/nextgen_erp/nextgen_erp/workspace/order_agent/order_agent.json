@@ -1,0 +1,124 @@
+{
+ "app": "nextgen_erp",
+ "charts": [],
+ "content": "[{\"id\": \"logo\", \"type\": \"paragraph\", \"data\": {\"text\": \"<img src=\\\"/assets/nextgen_erp/images/nextgen-logo.svg\\\" alt=\\\"NextGen Order AI\\\" style=\\\"height:44px\\\">\", \"col\": 12}}, {\"id\": \"hdr\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\">Order Intake</span>\", \"col\": 12}}, {\"id\": \"sc1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Review Queue\", \"col\": 4}}, {\"id\": \"sc2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"LINE Channel Settings\", \"col\": 4}}, {\"id\": \"sc3\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Automation Settings\", \"col\": 4}}, {\"id\": \"nc0\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"NextGen Needs Review\", \"col\": 3}}, {\"id\": \"nc1\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"NextGen Awaiting Customer\", \"col\": 3}}, {\"id\": \"nc2\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"NextGen Reserved\", \"col\": 3}}, {\"id\": \"nc3\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"NextGen Paid\", \"col\": 3}}]",
+ "creation": "2026-07-13 10:57:44.797326",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "hide_custom": 0,
+ "icon": "sell",
+ "idx": 0,
+ "indicator_color": "green",
+ "is_hidden": 0,
+ "label": "Order Agent",
+ "link_type": "DocType",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Order Intake",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "AI Order Intake",
+   "link_count": 0,
+   "link_to": "AI Order Intake",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "LINE Customer Map",
+   "link_count": 0,
+   "link_to": "LINE Customer Map",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "Integrations",
+   "link_count": 0,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "LINE Channel Settings",
+   "link_count": 0,
+   "link_to": "LINE Channel Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "NextGen Automation Settings",
+   "link_count": 0,
+   "link_to": "NextGen Automation Settings",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-07-13 10:57:44.797326",
+ "modified_by": "Administrator",
+ "module": "NextGen ERP",
+ "name": "Order Agent",
+ "number_cards": [
+  {
+   "number_card_name": "NextGen Needs Review"
+  },
+  {
+   "number_card_name": "NextGen Awaiting Customer"
+  },
+  {
+   "number_card_name": "NextGen Reserved"
+  },
+  {
+   "number_card_name": "NextGen Paid"
+  }
+ ],
+ "owner": "Administrator",
+ "public": 1,
+ "quick_lists": [],
+ "roles": [],
+ "sequence_id": 0.0,
+ "shortcuts": [
+  {
+   "color": "Orange",
+   "doc_view": "",
+   "label": "Review Queue",
+   "link_to": "AI Order Intake",
+   "type": "DocType"
+  },
+  {
+   "color": "Green",
+   "doc_view": "",
+   "label": "LINE Channel Settings",
+   "link_to": "LINE Channel Settings",
+   "type": "DocType"
+  },
+  {
+   "color": "Grey",
+   "doc_view": "",
+   "label": "Automation Settings",
+   "link_to": "NextGen Automation Settings",
+   "type": "DocType"
+  }
+ ],
+ "title": "Order Agent",
+ "type": "Workspace"
+}

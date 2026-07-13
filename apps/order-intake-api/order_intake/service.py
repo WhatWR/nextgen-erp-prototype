@@ -11,8 +11,9 @@ from zoneinfo import ZoneInfo
 from .adapters import ControlledWriteback
 from .catalog import parse_catalog
 from .db import Database
+from .erpnext_adapter import select_transaction_adapter
 from .matching import ProductCandidate, normalize_thai, parse_order_lines
-from .workflow import AutomationPolicy, ERPClawAdapter
+from .workflow import AutomationPolicy
 
 
 BANGKOK = ZoneInfo("Asia/Bangkok")
@@ -52,7 +53,9 @@ class OrderIntakeService:
         self.db.initialize()
         self.writeback = ControlledWriteback(export_dir)
         self.policy = AutomationPolicy()
-        self.erpclaw = ERPClawAdapter(export_dir)
+        # Order-to-cash backend, selected by ORDER_BACKEND (erpclaw | erpnext).
+        # Both adapters share the same method surface and return keys.
+        self.erpclaw = select_transaction_adapter(export_dir)
 
     def seed_demo(self, reset: bool = False) -> dict[str, Any]:
         created_at = now_iso()

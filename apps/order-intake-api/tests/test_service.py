@@ -70,15 +70,15 @@ class ServiceTest(unittest.TestCase):
         reserved = self.service.customer_confirmation(draft["id"], confirmed=True)
         self.assertEqual(reserved["status"], "reserved_for_pick")
         self.assertTrue(Path(reserved["erpclaw"]["plan"]).exists())
-        self.assertTrue(reserved["workflow"]["erpclaw_sales_order_id"].startswith("dry-so-"))
+        self.assertTrue(reserved["workflow"]["erpclaw_sales_order_id"].startswith("shadow-so-"))
 
         delivered = self.service.complete_delivery(draft["id"])
         self.assertEqual(delivered["status"], "awaiting_payment")
-        self.assertTrue(delivered["workflow"]["erpclaw_sales_invoice_id"].startswith("dry-inv-"))
+        self.assertTrue(delivered["workflow"]["erpclaw_sales_invoice_id"].startswith("shadow-inv-"))
 
         paid = self.service.record_payment(draft["id"], reference="PAY-001")
         self.assertEqual(paid["status"], "paid")
-        self.assertTrue(paid["workflow"]["erpclaw_payment_id"].startswith("dry-pay-"))
+        self.assertTrue(paid["workflow"]["erpclaw_payment_id"].startswith("shadow-pay-"))
         self.assertEqual(paid["outbound_messages"][-1]["message_type"], "payment_received_invoice")
 
     def test_catalog_csv_detects_columns(self) -> None:

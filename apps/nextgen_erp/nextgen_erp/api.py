@@ -1,0 +1,801 @@
+"""NextGen ERP whitelisted API.
+
+Two layers:
+
+* Order-to-cash primitives (`create_sales_order`, `deliver_and_invoice`,
+  `record_payment`) — the exact contract the external order-intake service's
+  ``ERPNextAdapter`` speaks. They create and submit real ERPNext documents.
+* Intake orchestration (`create_ai_order_intake`, `approve_ai_order_intake`,
+  `record_customer_confirmation`, `progress_delivery`, `progress_payment`) —
+  drives an AI Order Intake record through its lifecycle, calling the primitives
+  at the right transitions. These are what the Desk buttons and the external
+  service call.
+
+``external_reference`` (the intake name) is the idempotency anchor; callers
+guard re-entry by checking the linked document fields on the intake.
+"""
+
+from __future__ import annotations
+
+import base64
+import hashlib
+import hmac
+import json
+import time
+from urllib.parse import quote, urlparse
+
+import frappe
+from frappe import _
+from frappe.utils import flt, get_url, nowdate
+
+
+SERVICE_ROLE = "NextGen Order Service"
+OPERATIONS_ROLES = {"System Manager", "Sales Manager", "Sales User", SERVICE_ROLE}
+EXTERNAL_REFERENCE_FIELD = "custom_nextgen_external_reference"
+
+
+# --------------------------------------------------------------------------- #
+# Helpers
+# --------------------------------------------------------------------------- #
+def _default_warehouse(company: str) -> str | None:
+    wh = frappe.db.get_value(
+        "Warehouse", {"company": company, "is_group": 0}, "name", order_by="creation asc"
+    )
+    return wh
+
+
+def _as_list(value):
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (ValueError, TypeError):
+            return []
+    return value or []
+
+
+def _require_any_role(allowed: set[str]) -> None:
+    if frappe.session.user == "Administrator":
+        return
+    roles = set(frappe.get_roles(frappe.session.user))
+    if not roles.intersection(allowed):
+        frappe.throw(_("You are not permitted to run this NextGen operation"), frappe.PermissionError)
+
+
+def _require_service_role() -> None:
+    _require_any_role({"System Manager", SERVICE_ROLE})
+
+
+def _require_operations_role() -> None:
+    _require_any_role(OPERATIONS_ROLES)
+
+
+def _lock_intake(name: str):
+    """Lock one intake for the rest of the request transaction."""
+    frappe.db.sql("select name from `tabAI Order Intake` where name=%s for update", name)
+    return frappe.get_doc("AI Order Intake", name)
+
+
+def _save_intake(doc) -> None:
+    doc.flags.nextgen_transition = True
+    doc.save()
+
+
+def _existing_by_reference(doctype: str, external_reference: str):
+    if not external_reference or not frappe.get_meta(doctype).has_field(EXTERNAL_REFERENCE_FIELD):
+        return None
+    name = frappe.db.get_value(doctype, {EXTERNAL_REFERENCE_FIELD: external_reference}, "name")
+    return frappe.get_doc(doctype, name) if name else None
+
+
+def _set_external_reference(doc, external_reference: str) -> None:
+    if frappe.get_meta(doc.doctype).has_field(EXTERNAL_REFERENCE_FIELD):
+        doc.set(EXTERNAL_REFERENCE_FIELD, external_reference)
+
+
+def _selling_rate(item_code: str, customer: str, price_list: str | None = None) -> float:
+    """Use ERPNext's selling price, never an AI supplied rate."""
+    price_list = price_list or frappe.db.get_value("Customer", customer, "default_price_list")
+    price_list = price_list or frappe.db.get_single_value("Selling Settings", "selling_price_list")
+    if price_list:
+        rate = frappe.db.get_value(
+            "Item Price",
+            {"item_code": item_code, "price_list": price_list, "selling": 1},
+            "price_list_rate",
+            order_by="valid_from desc, modified desc",
+        )
+        if rate is not None:
+            return flt(rate)
+    return flt(frappe.db.get_value("Item", item_code, "standard_rate"))
+
+
+def _line_message(doc) -> str:
+    item_text = ", ".join(f"{row.item_name or row.item} x {row.qty:g} {row.uom or ''}".strip() for row in doc.items)
+    if doc.status == "Needs Review":
+        return f"รับออเดอร์แล้วค่ะ เลขที่ {doc.name} ระบบกำลังให้เจ้าหน้าที่ตรวจสอบรายการ: {item_text}"
+    if doc.status == "Awaiting Customer":
+        return f"กรุณายืนยันออเดอร์ {doc.name}: {item_text} ยอดประมาณ {doc.total:,.2f} บาท ตอบ ‘ยืนยัน’ หรือ ‘ยกเลิก’"
+    if doc.status == "Reserved":
+        return f"ยืนยันออเดอร์ {doc.name} แล้ว สินค้าถูกจองและกำลังจัดเตรียมส่งค่ะ"
+    if doc.status == "Awaiting Payment":
+        link = make_invoice_download_url(doc.sales_invoice, doc.line_ref) if doc.sales_invoice else ""
+        return f"จัดส่งออเดอร์ {doc.name} แล้ว ใบแจ้งหนี้ {doc.sales_invoice}: {link}".strip()
+    if doc.status == "Paid":
+        link = make_invoice_download_url(doc.sales_invoice, doc.line_ref) if doc.sales_invoice else ""
+        return f"ได้รับชำระเงินออเดอร์ {doc.name} แล้ว ขอบคุณค่ะ ใบเสร็จ/ใบแจ้งหนี้: {link}".strip()
+    if doc.status == "Rejected":
+        return f"ยกเลิกออเดอร์ {doc.name} แล้วค่ะ"
+    return f"ออเดอร์ {doc.name}: {doc.status}"
+
+
+def _queue_line_notification(doc) -> None:
+    if not doc.line_ref:
+        return
+    frappe.enqueue(
+        "nextgen_erp.line.push_text",
+        queue="short",
+        enqueue_after_commit=True,
+        recipient=doc.line_ref,
+        text=_line_message(doc),
+    )
+
+
+# --------------------------------------------------------------------------- #
+# Order-to-cash primitives (ERPNextAdapter contract)
+# --------------------------------------------------------------------------- #
+@frappe.whitelist()
+def create_sales_order(
+    external_reference: str,
+    customer: str,
+    company: str,
+    currency: str = "THB",
+    delivery_date: str | None = None,
+    items=None,
+    reserve_stock: int = 1,
+):
+    """Create + submit a Sales Order; optionally create/submit a Pick List.
+
+    Returns {"sales_order": name, "pick_list": name|None}.
+    """
+    _require_operations_role()
+    items = _as_list(items)
+    if not items:
+        frappe.throw(_("create_sales_order requires at least one item"))
+    existing = _existing_by_reference("Sales Order", external_reference)
+    if existing:
+        pick_list = frappe.db.get_value(
+            "Pick List Item", {"sales_order": existing.name, "docstatus": ["<", 2]}, "parent"
+        )
+        return {"sales_order": existing.name, "pick_list": pick_list, "already": True}
+
+    delivery_date = delivery_date or nowdate()
+    warehouse = _default_warehouse(company)
+    if not warehouse:
+        frappe.throw(_("No non-group warehouse is configured for company {0}").format(company))
+
+    so = frappe.new_doc("Sales Order")
+    so.customer = customer
+    so.company = company
+    so.currency = currency
+    so.conversion_rate = 1
+    so.transaction_date = nowdate()
+    so.delivery_date = delivery_date
+    so.order_type = "Sales"
+    so.po_no = external_reference
+    # ERPNext does not allow creating a Pick List after stock is reserved on the
+    # Sales Order. We therefore create the Pick List first and reserve against it.
+    so.reserve_stock = 0
+    _set_external_reference(so, external_reference)
+    for row in items:
+        item_code = row.get("item_code") or row.get("sku")
+        if not item_code or not frappe.db.exists("Item", item_code):
+            frappe.throw(_("Unknown ERPNext Item: {0}").format(item_code or "(blank)"))
+        rate = _selling_rate(item_code, customer)
+        if rate <= 0:
+            frappe.throw(_("No valid selling price is configured for Item {0}").format(item_code))
+        so.append(
+            "items",
+            {
+                "item_code": item_code,
+                "qty": flt(row.get("qty")),
+                "uom": row.get("uom"),
+                "rate": rate,
+                "warehouse": row.get("warehouse") or warehouse,
+                "delivery_date": delivery_date,
+                # Header stays off so ERPNext permits Pick List creation; the
+                # row flag allows reservation entries to be created from that Pick List.
+                "reserve_stock": 1 if int(reserve_stock or 0) else 0,
+            },
+        )
+    try:
+        so.insert()
+    except frappe.DuplicateEntryError:
+        existing = _existing_by_reference("Sales Order", external_reference)
+        if not existing:
+            raise
+        pick_list = frappe.db.get_value(
+            "Pick List Item", {"sales_order": existing.name, "docstatus": ["<", 2]}, "parent"
+        )
+        return {"sales_order": existing.name, "pick_list": pick_list, "already": True}
+    so.submit()
+
+    pick_list = None
+    if int(reserve_stock or 0):
+        pick_list = _make_pick_list(so.name)
+
+    return {"sales_order": so.name, "pick_list": pick_list}
+
+
+def _make_pick_list(sales_order: str) -> str:
+    """Create a Pick List or fail the whole transaction."""
+    from erpnext.selling.doctype.sales_order.sales_order import create_pick_list
+
+    pl = create_pick_list(sales_order)
+    if not pl.locations:
+        frappe.throw(_("ERPNext could not allocate stock to a Pick List for {0}").format(sales_order))
+    pl.pick_manually = 1
+    for row in pl.locations:
+        row.picked_qty = row.stock_qty
+    pl.insert()
+    pl.submit()
+    pl.create_stock_reservation_entries(notify=False)
+    expected = sum(flt(row.picked_qty or row.stock_qty) for row in pl.locations)
+    reserved = sum(
+        flt(value)
+        for value in frappe.get_all(
+            "Stock Reservation Entry",
+            filters={
+                "from_voucher_type": "Pick List",
+                "from_voucher_no": pl.name,
+                "docstatus": 1,
+            },
+            pluck="reserved_qty",
+        )
+    )
+    if expected <= 0 or reserved + 0.000001 < expected:
+        frappe.throw(
+            _("Full stock reservation could not be created for Pick List {0}: reserved {1} of {2}").format(
+                pl.name, reserved, expected
+            )
+        )
+    return pl.name
+
+
+@frappe.whitelist()
+def deliver_and_invoice(
+    external_reference: str,
+    sales_order: str,
+    pick_list: str | None = None,
+    items=None,
+):
+    """Create + submit a Delivery Note from the SO, then a Sales Invoice.
+
+    Returns {"delivery_note": name, "sales_invoice": name}.
+    """
+    _require_operations_role()
+    delivery_ref = f"{external_reference}:delivery"
+    invoice_ref = f"{external_reference}:invoice"
+    existing_dn = _existing_by_reference("Delivery Note", delivery_ref)
+    existing_si = _existing_by_reference("Sales Invoice", invoice_ref)
+    if existing_dn and existing_si:
+        return {
+            "delivery_note": existing_dn.name,
+            "sales_invoice": existing_si.name,
+            "already": True,
+        }
+
+    from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note
+    from erpnext.stock.doctype.delivery_note.delivery_note import make_sales_invoice
+
+    dn = existing_dn or make_delivery_note(sales_order)
+    if not existing_dn:
+        _set_external_reference(dn, delivery_ref)
+        dn.insert()
+        dn.submit()
+
+    si = existing_si or make_sales_invoice(dn.name)
+    if not existing_si:
+        _set_external_reference(si, invoice_ref)
+        si.insert()
+        si.submit()
+
+    return {"delivery_note": dn.name, "sales_invoice": si.name}
+
+
+@frappe.whitelist()
+def record_payment(
+    external_reference: str,
+    company: str,
+    customer: str,
+    currency: str = "THB",
+    amount: float = 0,
+    reference_no: str | None = None,
+    reference_date: str | None = None,
+    sales_invoice: str | None = None,
+):
+    """Create + submit a Payment Entry allocated to the Sales Invoice.
+
+    Returns {"payment_entry": name}.
+    """
+    _require_operations_role()
+    existing = _existing_by_reference("Payment Entry", external_reference)
+    if existing:
+        return {"payment_entry": existing.name, "already": True}
+    if not sales_invoice:
+        frappe.throw(_("sales_invoice is required"))
+
+    from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
+
+    pe = get_payment_entry("Sales Invoice", sales_invoice)
+    _set_external_reference(pe, external_reference)
+    pe.reference_no = reference_no or external_reference
+    pe.reference_date = reference_date or nowdate()
+    invoice_outstanding = flt(frappe.db.get_value("Sales Invoice", sales_invoice, "outstanding_amount"))
+    if invoice_outstanding <= 0:
+        frappe.throw(_("Sales Invoice {0} has no outstanding amount").format(sales_invoice))
+    if amount and abs(flt(amount) - invoice_outstanding) > 0.01:
+        frappe.throw(
+            _("Payment amount {0} does not match invoice outstanding amount {1}").format(
+                flt(amount), invoice_outstanding
+            )
+        )
+    pe.paid_amount = invoice_outstanding
+    pe.received_amount = invoice_outstanding
+    for reference in pe.references:
+        if reference.reference_doctype == "Sales Invoice" and reference.reference_name == sales_invoice:
+            reference.allocated_amount = invoice_outstanding
+    pe.insert()
+    pe.submit()
+
+    return {"payment_entry": pe.name}
+
+
+# --------------------------------------------------------------------------- #
+# Intake orchestration
+# --------------------------------------------------------------------------- #
+@frappe.whitelist()
+def create_ai_order_intake(payload=None):
+    """Create an AI Order Intake from the external service (idempotent).
+
+    payload keys: idempotency_key (reqd), merchant, line_ref, customer,
+    source_channel, source_text, confidence, total, automation_mode,
+    exception_reasons (list), items (list of line dicts).
+    """
+    _require_service_role()
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+    payload = payload or {}
+    key = payload.get("idempotency_key")
+    if not key:
+        frappe.throw(_("idempotency_key is required"))
+
+    existing = frappe.db.get_value("AI Order Intake", {"idempotency_key": key}, "name")
+    if existing:
+        return {"name": existing, "created": False, "status": frappe.db.get_value("AI Order Intake", existing, "status")}
+
+    exceptions = _as_list(payload.get("exception_reasons"))
+    doc = frappe.new_doc("AI Order Intake")
+    doc.idempotency_key = key
+    doc.merchant = payload.get("merchant") or "demo"
+    doc.line_ref = payload.get("line_ref")
+    doc.customer = payload.get("customer")
+    doc.source_channel = payload.get("source_channel") or "simulator"
+    doc.source_text = payload.get("source_text")
+    doc.confidence = flt(payload.get("confidence"))
+    requested_automation = payload.get("automation_mode") == "automatic"
+    threshold = flt(
+        frappe.db.get_single_value("NextGen Automation Settings", "confidence_threshold") or 0.95
+    )
+    auto_enabled = bool(
+        frappe.db.get_single_value("NextGen Automation Settings", "auto_confirm")
+    )
+    doc.automation_mode = "human_review"
+    doc.exception_reasons = json.dumps(exceptions, ensure_ascii=False) if exceptions else None
+    calculated_total = 0.0
+    for row in _as_list(payload.get("items")):
+        item_code = row.get("item_code") or row.get("sku")
+        rate = _selling_rate(item_code, doc.customer) if item_code and doc.customer else 0.0
+        qty = flt(row.get("qty"))
+        amount = qty * rate
+        calculated_total += amount
+        doc.append(
+            "items",
+            {
+                "raw_text": row.get("raw_text"),
+                "item": item_code,
+                "qty": qty,
+                "uom": row.get("uom"),
+                "rate": rate,
+                "amount": amount,
+                "confidence": flt(row.get("confidence")),
+                "exception_reason": row.get("exception_reason"),
+            },
+        )
+    doc.total = calculated_total
+    auto = bool(
+        auto_enabled
+        and requested_automation
+        and doc.customer
+        and doc.items
+        and not exceptions
+        and doc.confidence >= threshold
+        and all(row.item and not row.exception_reason for row in doc.items)
+    )
+    doc.automation_mode = "automatic" if auto else "human_review"
+    doc.status = "Awaiting Customer" if auto else "Needs Review"
+    try:
+        doc.insert()
+    except frappe.DuplicateEntryError:
+        existing = frappe.db.get_value("AI Order Intake", {"idempotency_key": key}, "name")
+        if not existing:
+            raise
+        return {
+            "name": existing,
+            "created": False,
+            "status": frappe.db.get_value("AI Order Intake", existing, "status"),
+        }
+    _queue_line_notification(doc)
+    return {"name": doc.name, "created": True, "status": doc.status}
+
+
+@frappe.whitelist()
+def approve_ai_order_intake(name: str, reviewer: str | None = None, note: str | None = None):
+    """Human approval — move a reviewed intake to Awaiting Customer."""
+    _require_operations_role()
+    doc = _lock_intake(name)
+    if doc.status in ("Reserved", "Awaiting Payment", "Paid"):
+        return {"name": name, "status": doc.status, "already": True}
+    doc.status = "Awaiting Customer"
+    doc.reviewer = reviewer or frappe.session.user
+    if note:
+        doc.decision_note = note
+    if not doc.customer or not doc.items or any(not row.item for row in doc.items):
+        frappe.throw(_("Resolve the customer and every item before approval"))
+    doc.total = 0
+    for row in doc.items:
+        row.rate = _selling_rate(row.item, doc.customer)
+        row.amount = flt(row.qty) * flt(row.rate)
+        doc.total += row.amount
+    _save_intake(doc)
+    _queue_line_notification(doc)
+    return {"name": name, "status": doc.status}
+
+
+@frappe.whitelist()
+def record_customer_confirmation(name: str, confirmed: int = 1):
+    """Customer confirmation — on yes, create SO + reserve; on no, reject."""
+    _require_operations_role()
+    doc = _lock_intake(name)
+    if not int(confirmed or 0):
+        if doc.status == "Rejected":
+            return {"name": name, "status": doc.status, "already": True}
+        doc.status = "Rejected"
+        _save_intake(doc)
+        _queue_line_notification(doc)
+        return {"name": name, "status": doc.status}
+
+    if doc.sales_order:
+        return {"name": name, "status": doc.status, "sales_order": doc.sales_order, "already": True}
+    if doc.status != "Awaiting Customer":
+        frappe.throw(_("Intake must be Awaiting Customer before confirmation"))
+
+    company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
+        "Global Defaults", "default_company"
+    )
+    if not company:
+        frappe.throw(_("Configure a default ERPNext company before confirming orders"))
+    items = [
+        {"item_code": r.item, "qty": r.qty, "uom": r.uom, "rate": r.rate}
+        for r in doc.items
+    ]
+    result = create_sales_order(
+        external_reference=doc.name,
+        customer=doc.customer,
+        company=company,
+        currency="THB",
+        delivery_date=nowdate(),
+        items=items,
+        reserve_stock=1,
+    )
+    doc.sales_order = result["sales_order"]
+    doc.pick_list = result.get("pick_list")
+    doc.status = "Reserved"
+    _save_intake(doc)
+    _queue_line_notification(doc)
+    return {"name": name, "status": doc.status, **result}
+
+
+@frappe.whitelist()
+def progress_delivery(name: str):
+    """Create Delivery Note + Sales Invoice for a reserved intake."""
+    _require_operations_role()
+    doc = _lock_intake(name)
+    if doc.delivery_note and doc.sales_invoice:
+        return {
+            "name": name,
+            "status": doc.status,
+            "delivery_note": doc.delivery_note,
+            "sales_invoice": doc.sales_invoice,
+            "already": True,
+        }
+    if doc.status != "Reserved":
+        frappe.throw(_("Intake must be Reserved before delivery"))
+    result = deliver_and_invoice(external_reference=doc.name, sales_order=doc.sales_order, pick_list=doc.pick_list)
+    doc.delivery_note = result["delivery_note"]
+    doc.sales_invoice = result["sales_invoice"]
+    doc.status = "Awaiting Payment"
+    _save_intake(doc)
+    _queue_line_notification(doc)
+    return {"name": name, "status": doc.status, **result}
+
+
+@frappe.whitelist()
+def progress_payment(name: str, reference_no: str | None = None):
+    """Record a Payment Entry for an invoiced intake."""
+    _require_operations_role()
+    doc = _lock_intake(name)
+    if doc.payment_entry:
+        return {
+            "name": name,
+            "status": doc.status,
+            "payment_entry": doc.payment_entry,
+            "already": True,
+        }
+    if doc.status != "Awaiting Payment":
+        frappe.throw(_("Intake must be Awaiting Payment before recording payment"))
+    company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
+        "Global Defaults", "default_company"
+    )
+    result = record_payment(
+        external_reference=doc.name,
+        company=company,
+        customer=doc.customer,
+        currency="THB",
+        amount=doc.total,
+        reference_no=reference_no,
+        sales_invoice=doc.sales_invoice,
+    )
+    doc.payment_entry = result["payment_entry"]
+    doc.status = "Paid"
+    _save_intake(doc)
+    _queue_line_notification(doc)
+    return {"name": name, "status": doc.status, **result}
+
+
+# --------------------------------------------------------------------------- #
+# Integrations — LINE config (read by the external service) + quick intake
+# --------------------------------------------------------------------------- #
+@frappe.whitelist()
+def get_line_config():
+    """Return LINE Channel Settings for the authenticated external service.
+
+    Password fields are returned decrypted; only expose to a scoped API user.
+    """
+    _require_service_role()
+    s = frappe.get_single("LINE Channel Settings")
+    return {
+        "enabled": bool(s.enabled),
+        "merchant": s.merchant or "demo",
+        "channel_id": s.channel_id or "",
+        "channel_secret": s.get_password("channel_secret", raise_exception=False) or "",
+        "webhook_url": s.webhook_url or "",
+    }
+
+
+@frappe.whitelist()
+def resolve_line_customer(line_id: str):
+    """Resolve a verified LINE sender to an ERPNext Customer."""
+    _require_service_role()
+    customer = frappe.db.get_value("LINE Customer Map", line_id, "customer")
+    return {"line_id": line_id, "customer": customer}
+
+
+@frappe.whitelist()
+def get_automation_settings():
+    _require_service_role()
+    return {
+        "confidence_threshold": flt(
+            frappe.db.get_single_value("NextGen Automation Settings", "confidence_threshold")
+            or 0.95
+        ),
+        "auto_route_high_confidence": bool(
+            frappe.db.get_single_value("NextGen Automation Settings", "auto_confirm")
+        ),
+    }
+
+
+@frappe.whitelist()
+def handle_line_reply(line_id: str, text: str, event_id: str | None = None):
+    """Apply a LINE yes/no reply to the customer's current confirmation request."""
+    _require_service_role()
+    if event_id:
+        existing = frappe.db.get_value("LINE Event Receipt", event_id, "result_json")
+        if existing:
+            result = json.loads(existing)
+            result["duplicate"] = True
+            return result
+    normalized = "".join((text or "").strip().lower().split())
+    yes = {"ยืนยัน", "ตกลง", "โอเค", "ok", "yes", "confirm", "ใช่"}
+    no = {"ยกเลิก", "ไม่เอา", "ไม่ยืนยัน", "cancel", "no"}
+    if normalized not in yes | no:
+        return {"handled": False}
+    name = frappe.db.get_value(
+        "AI Order Intake",
+        {"line_ref": line_id, "status": "Awaiting Customer"},
+        "name",
+        order_by="modified desc",
+    )
+    if not name:
+        return {"handled": False}
+    result = record_customer_confirmation(name, confirmed=1 if normalized in yes else 0)
+    response = {"handled": True, **result}
+    if event_id:
+        frappe.get_doc(
+            {
+                "doctype": "LINE Event Receipt",
+                "event_id": event_id,
+                "line_id": line_id,
+                "result_json": json.dumps(response, ensure_ascii=False),
+            }
+        ).insert()
+    return response
+
+
+@frappe.whitelist()
+def get_catalog(warehouse: str, price_list: str | None = None, limit_start: int = 0, limit: int = 500):
+    """Return a page of sellable catalog data in three database reads."""
+    _require_service_role()
+    limit = min(max(int(limit or 500), 1), 1000)
+    limit_start = max(int(limit_start or 0), 0)
+    fields = ["item_code", "item_name", "stock_uom", "standard_rate", "item_group"]
+    if frappe.get_meta("Item").has_field("custom_nextgen_aliases"):
+        fields.append("custom_nextgen_aliases")
+    items = frappe.get_all(
+        "Item",
+        fields=fields,
+        filters={"disabled": 0, "is_sales_item": 1},
+        order_by="item_code",
+        limit_start=limit_start,
+        limit_page_length=limit,
+    )
+    codes = [row.item_code for row in items]
+    bins = frappe.get_all(
+        "Bin",
+        fields=["item_code", "projected_qty"],
+        filters={"warehouse": warehouse, "item_code": ["in", codes]},
+        limit_page_length=max(len(codes), 1),
+    ) if codes else []
+    prices = frappe.get_all(
+        "Item Price",
+        fields=["item_code", "price_list_rate"],
+        filters={"selling": 1, "price_list": price_list, "item_code": ["in", codes]},
+        order_by="valid_from desc, modified desc",
+        limit_page_length=max(len(codes) * 3, 1),
+    ) if codes and price_list else []
+    stock_by_item = {}
+    for row in bins:
+        stock_by_item[row.item_code] = stock_by_item.get(row.item_code, 0) + flt(row.projected_qty)
+    price_by_item = {}
+    for row in prices:
+        price_by_item.setdefault(row.item_code, flt(row.price_list_rate))
+    data = []
+    for row in items:
+        aliases = _as_list(row.get("custom_nextgen_aliases"))
+        if isinstance(row.get("custom_nextgen_aliases"), str) and not aliases:
+            aliases = [part.strip() for part in row.custom_nextgen_aliases.split(",") if part.strip()]
+        data.append(
+            {
+                "item_code": row.item_code,
+                "item_name": row.item_name,
+                "stock_uom": row.stock_uom,
+                "item_group": row.item_group,
+                "aliases": aliases,
+                "price": price_by_item.get(row.item_code, flt(row.standard_rate)),
+                "projected_qty": stock_by_item.get(row.item_code, 0),
+            }
+        )
+    return {"data": data, "has_more": len(items) == limit, "next_start": limit_start + len(items)}
+
+
+@frappe.whitelist()
+def get_projected_qty(item_code: str, warehouse: str):
+    _require_service_role()
+    return {
+        "item_code": item_code,
+        "warehouse": warehouse,
+        "projected_qty": flt(
+            frappe.db.get_value("Bin", {"item_code": item_code, "warehouse": warehouse}, "projected_qty")
+        ),
+    }
+
+
+@frappe.whitelist()
+def get_item_price(item_code: str, customer: str | None = None, price_list: str | None = None):
+    _require_service_role()
+    if not customer and not price_list:
+        frappe.throw(_("customer or price_list is required"))
+    rate = _selling_rate(item_code, customer, price_list) if customer else flt(
+        frappe.db.get_value(
+            "Item Price",
+            {"item_code": item_code, "price_list": price_list, "selling": 1},
+            "price_list_rate",
+            order_by="valid_from desc, modified desc",
+        )
+    )
+    return {"item_code": item_code, "price_list": price_list, "rate": rate}
+
+
+def _invoice_token(invoice: str, line_ref: str | None, expires: int) -> str:
+    payload = json.dumps(
+        {"invoice": invoice, "line_ref": line_ref or "", "expires": expires},
+        separators=(",", ":"),
+    ).encode()
+    encoded = base64.urlsafe_b64encode(payload).decode().rstrip("=")
+    key = frappe.get_site_config().encryption_key.encode()
+    signature = hmac.new(key, encoded.encode(), hashlib.sha256).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def make_invoice_download_url(invoice: str, line_ref: str | None = None) -> str:
+    days = int(frappe.db.get_single_value("NextGen Automation Settings", "invoice_link_days") or 7)
+    token = _invoice_token(invoice, line_ref, int(time.time()) + days * 86400)
+    return f"{get_url()}/api/method/nextgen_erp.api.download_invoice?token={quote(token)}"
+
+
+@frappe.whitelist(allow_guest=True)
+def download_invoice(token: str):
+    """Download an invoice through an expiring, tamper-evident LINE link."""
+    try:
+        encoded, supplied_signature = token.rsplit(".", 1)
+        key = frappe.get_site_config().encryption_key.encode()
+        expected = hmac.new(key, encoded.encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(expected, supplied_signature):
+            raise ValueError("bad signature")
+        raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        payload = json.loads(raw)
+        if int(payload.get("expires") or 0) < int(time.time()):
+            raise ValueError("expired")
+        invoice = str(payload.get("invoice") or "")
+        if not invoice or not frappe.db.exists("Sales Invoice", invoice):
+            raise ValueError("missing invoice")
+    except (ValueError, TypeError, json.JSONDecodeError):
+        frappe.throw(_("This invoice link is invalid or expired"), frappe.PermissionError)
+    frappe.local.response.filename = f"{invoice}.pdf"
+    frappe.local.response.filecontent = frappe.get_print("Sales Invoice", invoice, as_pdf=True)
+    frappe.local.response.type = "pdf"
+    return None
+
+
+@frappe.whitelist()
+def quick_intake(text: str, customer: str | None = None):
+    """Desk 'New from LINE text': relay to the external extractor, which parses
+    the Thai message and pushes an AI Order Intake back into ERPNext.
+
+    Keeps extraction external; returns the created intake name for the UI to open.
+    """
+    _require_operations_role()
+    import frappe.integrations.utils
+
+    if not (text or "").strip():
+        frappe.throw(_("Message text is required"))
+    settings = frappe.get_single("NextGen Automation Settings")
+    base = (settings.external_service_url or "").rstrip("/")
+    if not base:
+        frappe.throw(_("Set 'External Service URL' in NextGen Automation Settings first"))
+    parsed = urlparse(base)
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        frappe.throw(_("External Service URL must be a complete HTTP(S) URL"))
+    if parsed.scheme != "https" and parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        frappe.throw(_("External Service URL must use HTTPS outside local development"))
+    api_key = settings.get_password("external_service_api_key", raise_exception=False) or ""
+    if not api_key:
+        frappe.throw(_("Set 'External Service API Key' in NextGen Automation Settings first"))
+
+    key = f"desk-{frappe.generate_hash(length=10)}"
+    resp = frappe.integrations.utils.make_post_request(
+        f"{base}/api/intake/erpnext",
+        headers={"Content-Type": "application/json", "X-Prototype-Key": api_key},
+        data=json.dumps({"text": text, "customer": customer, "idempotency_key": key}),
+    )
+    # The external service returns {"erpnext": {"name": ...}, ...}
+    erp = (resp or {}).get("erpnext") or {}
+    return {"name": erp.get("name"), "status": erp.get("status"), "idempotency_key": key}

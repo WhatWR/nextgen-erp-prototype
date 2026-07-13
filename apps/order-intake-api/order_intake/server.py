@@ -4,6 +4,7 @@ import json
 import base64
 import os
 import re
+import uuid
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -32,14 +33,31 @@ def build_handler(
     service: OrderIntakeService,
     line_integration: LineIntegrationStore | None = None,
     erpclaw_integration: ERPClawIntegrationStore | None = None,
+    line_workflow=None,
 ):
-    line_integration = line_integration or LineIntegrationStore(
-        service.db.path.parent / "line_integration.json"
-    )
+    if line_integration is None:
+        if os.environ.get("LINE_CONFIG_SOURCE", "erpnext") == "erpnext":
+            from .erpnext_line_config import ErpnextLineConfig
+
+            line_integration = ErpnextLineConfig()
+        else:
+            line_integration = LineIntegrationStore(
+                service.db.path.parent / "line_integration.json"
+            )
     erpclaw_integration = erpclaw_integration or ERPClawIntegrationStore(
         service.db.path.parent / "erpclaw_integration.json",
         Path(__file__).resolve().parents[3] / "vendor" / "erpclaw",
     )
+    line_backend = os.environ.get("LINE_WORKFLOW_BACKEND", "erpnext").lower()
+    legacy_enabled = os.environ.get("ENABLE_LEGACY_PROTOTYPE", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    if line_workflow is None and line_backend == "erpnext":
+        from .erpnext_line import ERPNextLineWorkflow
+
+        line_workflow = ERPNextLineWorkflow(warehouse=os.environ.get("ERPNEXT_WAREHOUSE"))
     class Handler(BaseHTTPRequestHandler):
         server_version = "NextGenOrderIntake/0.1"
 
@@ -58,22 +76,25 @@ def build_handler(
 
         def do_GET(self) -> None:  # noqa: N802
             try:
-                self._require_prototype_key()
                 parsed = urlparse(self.path)
-                query = parse_qs(parsed.query)
                 if parsed.path == "/health":
                     self._json({"status": "ok", "service": "order-intake-api"})
                     return
+                self._require_prototype_key()
+                query = parse_qs(parsed.query)
                 if parsed.path == "/api/dashboard":
+                    self._require_legacy_enabled()
                     merchant_id = self._query_value(query, "merchant_id", "demo")
                     self._json(service.dashboard(merchant_id))
                     return
                 if parsed.path == "/api/reviews":
+                    self._require_legacy_enabled()
                     merchant_id = self._query_value(query, "merchant_id", "demo")
                     status = self._query_value(query, "status")
                     self._json({"reviews": service.list_reviews(merchant_id, status=status)})
                     return
                 if parsed.path == "/api/audit":
+                    self._require_legacy_enabled()
                     merchant_id = self._query_value(query, "merchant_id", "demo")
                     self._json({"events": service.list_audit(merchant_id)})
                     return
@@ -81,14 +102,17 @@ def build_handler(
                     self._json(line_integration.status())
                     return
                 if parsed.path == "/api/integrations/erpclaw":
+                    self._require_legacy_enabled()
                     self._json(erpclaw_integration.status())
                     return
                 if parsed.path == "/api/catalog":
+                    self._require_legacy_enabled()
                     merchant_id = self._query_value(query, "merchant_id", "demo")
                     self._json(service.catalog(merchant_id))
                     return
                 match = REVIEW_RE.match(parsed.path)
                 if match:
+                    self._require_legacy_enabled()
                     self._json(service.get_review(match.group("draft_id")))
                     return
                 self._json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
@@ -104,9 +128,11 @@ def build_handler(
                 self._require_prototype_key()
                 body = self._json_body()
                 if parsed.path == "/api/demo/seed":
+                    self._require_legacy_enabled()
                     self._json(service.seed_demo(reset=bool(body.get("reset", False))))
                     return
                 if parsed.path == "/api/intake/messages":
+                    self._require_legacy_enabled()
                     result = service.create_from_message(
                         merchant_id=str(body.get("merchant_id") or "demo"),
                         customer_ref=body.get("customer_ref"),
@@ -116,7 +142,22 @@ def build_handler(
                     )
                     self._json(result, HTTPStatus.CREATED if result.get("created") else HTTPStatus.OK)
                     return
+                if parsed.path == "/api/intake/erpnext":
+                    from .erpnext_bridge import intake_from_message
+
+                    result = intake_from_message(
+                        str(body.get("text") or ""),
+                        customer=body.get("customer"),
+                        idempotency_key=str(body.get("idempotency_key") or "")
+                        or f"desk-{uuid.uuid4().hex[:10]}",
+                        line_ref=body.get("line_ref"),
+                        source_channel=str(body.get("source_channel") or "desk"),
+                        warehouse=os.environ.get("ERPNEXT_WAREHOUSE"),
+                    )
+                    self._json(result)
+                    return
                 if parsed.path == "/api/catalog/import":
+                    self._require_legacy_enabled()
                     filename = str(body.get("filename") or "")
                     try:
                         content = base64.b64decode(str(body.get("content_base64") or ""), validate=True)
@@ -135,9 +176,11 @@ def build_handler(
                     self._json(line_integration.test())
                     return
                 if parsed.path == "/api/integrations/erpclaw":
+                    self._require_legacy_enabled()
                     self._json(erpclaw_integration.save(body))
                     return
                 if parsed.path == "/api/integrations/erpclaw/sync":
+                    self._require_legacy_enabled()
                     products = erpclaw_integration.fetch_catalog()
                     result = service.sync_erpclaw_catalog(
                         str(body.get("merchant_id") or "demo"), products
@@ -146,6 +189,7 @@ def build_handler(
                     return
                 match = DECISION_RE.match(parsed.path)
                 if match:
+                    self._require_legacy_enabled()
                     reviewer = str(body.get("reviewer") or "")
                     if match.group("action") == "approve":
                         result = service.approve_review(
@@ -163,6 +207,7 @@ def build_handler(
                     return
                 workflow_match = WORKFLOW_RE.match(parsed.path)
                 if workflow_match:
+                    self._require_legacy_enabled()
                     action = workflow_match.group("action")
                     draft_id = workflow_match.group("draft_id")
                     if action == "customer-confirm":
@@ -195,6 +240,7 @@ def build_handler(
                 if not match:
                     self._json({"error": "not_found"}, HTTPStatus.NOT_FOUND)
                     return
+                self._require_legacy_enabled()
                 body = self._json_body()
                 self._json(
                     service.update_review(
@@ -225,6 +271,16 @@ def build_handler(
                     continue
                 source = event.get("source") or {}
                 customer_ref = str(source.get("userId") or source.get("groupId") or "")
+                event_id = str(event.get("webhookEventId") or message.get("id") or "")
+                if line_backend == "erpnext":
+                    result = line_workflow.handle_event(
+                        line_id=customer_ref,
+                        text=str(message.get("text") or ""),
+                        event_id=event_id,
+                    )
+                    created.append(result.get("name"))
+                    continue
+                self._require_legacy_enabled()
                 customer_reply = service.handle_customer_reply(
                     customer_ref, str(message.get("text") or "")
                 )
@@ -236,7 +292,7 @@ def build_handler(
                     merchant_id=line_integration.merchant_id(),
                     customer_ref=customer_ref or None,
                     text=str(message.get("text") or ""),
-                    idempotency_key=str(event.get("webhookEventId") or message.get("id") or ""),
+                    idempotency_key=event_id,
                     source_channel="line",
                 )
                 created.append(result["id"])
@@ -283,6 +339,10 @@ def build_handler(
             if expected and self.headers.get("X-Prototype-Key") != expected:
                 raise PermissionError("invalid prototype API key")
 
+        def _require_legacy_enabled(self) -> None:
+            if not legacy_enabled:
+                raise NotFoundError("legacy prototype endpoint is disabled")
+
         @staticmethod
         def _query_value(query: dict, key: str, default=None):
             values = query.get(key)
@@ -328,7 +388,10 @@ def serve(
         export_dir or os.environ.get("ORDER_INTAKE_EXPORT_DIR", base / "data" / "exports")
     )
     service = OrderIntakeService(db_path, export_dir)
-    if os.environ.get("ORDER_INTAKE_AUTO_SEED", "1") == "1":
+    if (
+        os.environ.get("ENABLE_LEGACY_PROTOTYPE", "").lower() in {"1", "true", "yes"}
+        and os.environ.get("ORDER_INTAKE_AUTO_SEED", "0") == "1"
+    ):
         service.seed_demo(reset=False)
     server = ThreadingHTTPServer((host, port), build_handler(service))
     print(f"Order Intake API listening on http://{host}:{port}")

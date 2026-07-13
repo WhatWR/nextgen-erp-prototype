@@ -1,0 +1,12 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$ERP_DOMAIN} {
+	encode zstd gzip
+
+	@line_webhook path /webhooks/line*
+	reverse_proxy @line_webhook order-intake:8200
+
+	reverse_proxy frontend:8080
+}

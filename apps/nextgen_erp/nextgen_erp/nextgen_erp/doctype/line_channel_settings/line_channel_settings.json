@@ -1,0 +1,80 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-07-12 23:00:38.039237",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "merchant",
+  "channel_id",
+  "channel_secret",
+  "channel_access_token",
+  "webhook_url"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enable Incoming LINE Orders"
+  },
+  {
+   "default": "demo",
+   "fieldname": "merchant",
+   "fieldtype": "Data",
+   "label": "Merchant"
+  },
+  {
+   "fieldname": "channel_id",
+   "fieldtype": "Data",
+   "label": "LINE Channel ID"
+  },
+  {
+   "description": "Verifies the X-Line-Signature on incoming events",
+   "fieldname": "channel_secret",
+   "fieldtype": "Password",
+   "label": "Channel Secret"
+  },
+  {
+   "description": "Required to push confirmations/updates back to customers",
+   "fieldname": "channel_access_token",
+   "fieldtype": "Password",
+   "label": "Channel Access Token"
+  },
+  {
+   "default": "http://127.0.0.1:8200/webhooks/line",
+   "description": "Public HTTPS address ending in /webhooks/line",
+   "fieldname": "webhook_url",
+   "fieldtype": "Data",
+   "label": "Webhook URL"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-07-12 23:00:38.039237",
+ "modified_by": "Administrator",
+ "module": "NextGen ERP",
+ "name": "LINE Channel Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 44 44" width="44" height="44" role="img" aria-label="NextGen Order AI">
+  <defs>
+    <linearGradient id="ngi" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#5e64ff"/>
+      <stop offset="1" stop-color="#00b8a9"/>
+    </linearGradient>
+  </defs>
+  <rect x="0" y="0" width="44" height="44" rx="12" fill="url(#ngi)"/>
+  <!-- Chat bubble -->
+  <path d="M13 13h18a4 4 0 0 1 4 4v9a4 4 0 0 1-4 4h-9.5l-6.5 4.6V30H13a4 4 0 0 1-4-4v-9a4 4 0 0 1 4-4z" fill="#ffffff"/>
+  <!-- AI spark -->
+  <path d="M22 16.4l1.5 3.8 3.8 1.5-3.8 1.5L22 27l-1.5-3.8-3.8-1.5 3.8-1.5z" fill="#ff8a3d"/>
+</svg>

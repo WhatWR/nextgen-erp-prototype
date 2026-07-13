@@ -11,6 +11,7 @@ import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
 from pathlib import Path
+from unittest.mock import patch
 
 from order_intake.server import build_handler
 from order_intake.line_integration import LineIntegrationStore
@@ -19,6 +20,16 @@ from order_intake.service import OrderIntakeService
 
 class HttpTest(unittest.TestCase):
     def setUp(self) -> None:
+        self.env = patch.dict(
+            "os.environ",
+            {
+                "LINE_WORKFLOW_BACKEND": "legacy",
+                "ORDER_BACKEND": "erpclaw",
+                "ENABLE_LEGACY_PROTOTYPE": "1",
+            },
+        )
+        self.env.start()
+        self.addCleanup(self.env.stop)
         self.temp = tempfile.TemporaryDirectory()
         root = Path(self.temp.name)
         service = OrderIntakeService(root / "http.sqlite3", root / "exports")
@@ -45,12 +56,12 @@ class HttpTest(unittest.TestCase):
             method=method,
             headers={"Content-Type": "application/json"},
         )
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.urlopen(request, timeout=5) as response:
             return response.status, json.loads(response.read().decode())
 
     def raw_request(self, path: str, body: bytes, headers: dict):
         request = urllib.request.Request(self.base + path, data=body, method="POST", headers=headers)
-        with urllib.request.urlopen(request) as response:
+        with urllib.request.urlopen(request, timeout=5) as response:
             return response.status, json.loads(response.read().decode())
 
     def test_health_dashboard_and_review_flow(self) -> None:

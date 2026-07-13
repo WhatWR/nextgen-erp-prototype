@@ -1,18 +1,34 @@
 {
-  "generated_at": "2026-07-12",
+  "generated_at": "2026-07-13",
   "components": {
     "erpclaw": {
       "repository": "https://github.com/avansaber/erpclaw.git",
       "commit": "4ae975868ba4de8a651905e2d87b6107ac0e88de",
       "path": "vendor/erpclaw",
-      "license": "GPL-3.0"
+      "license": "GPL-3.0",
+      "local_patch": "patches/erpclaw-nextgen.patch.gz"
     },
     "erpclaw-web": {
       "repository": "https://github.com/avansaber/erpclaw-web.git",
       "commit": "898ed5fd5945b4cbda7feaefc665b3dc6beb2fdc",
       "path": "vendor/erpclaw-web",
       "license": "GPL-3.0",
-      "local_branch": "nextgen-thailand"
+      "local_branch": "nextgen-thailand",
+      "local_patch": "patches/erpclaw-web-nextgen.patch.gz"
+    },
+    "frappe": {
+      "repository": "https://github.com/frappe/frappe.git",
+      "commit": "5c16f12192815204a7eda2b2ab365a557a6e7def",
+      "version": "v16.20.0",
+      "path": "vendor/frappe",
+      "license": "MIT"
+    },
+    "erpnext": {
+      "repository": "https://github.com/frappe/erpnext.git",
+      "commit": "ff46d20b259a2d65a7ded959df9f9a42991a3562",
+      "version": "v16.20.0",
+      "path": "vendor/erpnext",
+      "license": "GPL-3.0"
     }
   }
 }

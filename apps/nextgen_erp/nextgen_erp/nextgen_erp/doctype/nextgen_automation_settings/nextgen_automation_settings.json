@@ -1,0 +1,73 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2026-07-12 22:10:39.827556",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "confidence_threshold",
+  "auto_confirm",
+  "invoice_link_days",
+  "external_service_url",
+  "external_service_api_key"
+ ],
+ "fields": [
+  {
+   "default": "0.95",
+   "fieldname": "confidence_threshold",
+   "fieldtype": "Float",
+   "label": "Confidence Threshold"
+  },
+  {
+   "default": "1",
+   "fieldname": "auto_confirm",
+   "fieldtype": "Check",
+   "label": "Auto-route High Confidence to Customer Confirmation"
+  },
+  {
+   "default": "7",
+   "fieldname": "invoice_link_days",
+   "fieldtype": "Int",
+   "label": "Invoice Link Validity (Days)"
+  },
+  {
+   "description": "order-intake-api base URL for LINE reply webhooks",
+   "fieldname": "external_service_url",
+   "fieldtype": "Data",
+   "label": "External Service URL"
+  },
+  {
+   "description": "Shared key used only for ERPNext Desk to call the external intake service",
+   "fieldname": "external_service_api_key",
+   "fieldtype": "Password",
+   "label": "External Service API Key"
+  }
+ ],
+ "grid_page_length": 50,
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-07-12 22:10:39.827556",
+ "modified_by": "Administrator",
+ "module": "NextGen ERP",
+ "name": "NextGen Automation Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "row_format": "Dynamic",
+ "rows_threshold_for_grid_search": 20,
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

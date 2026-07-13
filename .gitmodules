@@ -4,3 +4,9 @@
 [submodule "vendor/erpclaw-web"]
 	path = vendor/erpclaw-web
 	url = https://github.com/avansaber/erpclaw-web.git
+[submodule "vendor/frappe"]
+	path = vendor/frappe
+	url = https://github.com/frappe/frappe.git
+[submodule "vendor/erpnext"]
+	path = vendor/erpnext
+	url = https://github.com/frappe/erpnext.git

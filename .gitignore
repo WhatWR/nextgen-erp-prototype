@@ -1,5 +1,6 @@
 .DS_Store
 .env
+.env.server
 .venv/
 tmp/
 *.log
@@ -10,3 +11,4 @@ line_integration.json
 erpclaw_integration.json
 __pycache__/
 *.py[cod]
+.vite/
