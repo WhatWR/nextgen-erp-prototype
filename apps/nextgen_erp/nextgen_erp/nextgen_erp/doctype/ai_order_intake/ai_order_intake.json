@@ -32,7 +32,13 @@
   "delivery_note",
   "cb3",
   "sales_invoice",
-  "payment_entry"
+  "payment_entry",
+  "sb_payment",
+  "payment_slip",
+  "payment_verification_status",
+  "payment_verification_confidence",
+  "payment_reference",
+  "payment_verification_note"
  ],
  "fields": [
   {
@@ -94,7 +100,7 @@
    "in_standard_filter": 1,
    "label": "Status",
    "read_only": 1,
-   "options": "Needs Review\nReady\nAwaiting Customer\nReserved\nAwaiting Payment\nPaid\nRejected"
+   "options": "Needs Review\nReady\nAwaiting Customer\nReserved\nAwaiting Payment\nPayment Review\nReady for Delivery\nDelivered\nPaid\nRejected"
   },
   {
    "default": "human_review",
@@ -189,6 +195,42 @@
    "fieldtype": "Link",
    "label": "Payment Entry",
    "options": "Payment Entry",
+   "read_only": 1
+  },
+  {
+   "fieldname": "sb_payment",
+   "fieldtype": "Section Break",
+   "label": "Payment Verification"
+  },
+  {
+   "fieldname": "payment_slip",
+   "fieldtype": "Attach",
+   "label": "Payment Slip",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_verification_status",
+   "fieldtype": "Select",
+   "label": "Verification Status",
+   "options": "\nNeeds Review\nVerified\nRejected",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_verification_confidence",
+   "fieldtype": "Float",
+   "label": "Verification Confidence",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_reference",
+   "fieldtype": "Data",
+   "label": "Payment Reference",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_verification_note",
+   "fieldtype": "Small Text",
+   "label": "Verification Note",
    "read_only": 1
   }
  ],

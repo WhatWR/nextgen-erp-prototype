@@ -277,11 +277,22 @@ def build_handler(
             created = []
             for event in payload.get("events", []):
                 message = event.get("message") or {}
-                if event.get("type") != "message" or message.get("type") != "text":
+                if event.get("type") != "message":
                     continue
                 source = event.get("source") or {}
                 customer_ref = str(source.get("userId") or source.get("groupId") or "")
                 event_id = str(event.get("webhookEventId") or message.get("id") or "")
+                if message.get("type") == "image" and line_backend == "erpnext":
+                    result = line_workflow.handle_attachment(
+                        line_id=customer_ref,
+                        message_id=str(message.get("id") or ""),
+                        event_id=event_id,
+                        content_type="image",
+                    )
+                    created.append(result.get("name"))
+                    continue
+                if message.get("type") != "text":
+                    continue
                 if line_backend == "erpnext":
                     result = line_workflow.handle_event(
                         line_id=customer_ref,

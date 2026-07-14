@@ -4,10 +4,11 @@ authors = [
     { name = "NextGen", email = "admin@nextgen.local"}
 ]
 description = "NextGen AI order intake and order-to-cash orchestration for ERPNext"
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 readme = "README.md"
 dynamic = ["version"]
 dependencies = [
+    "qrcode[pil]>=8.0,<9.0",
     # "frappe~=16.0.0" # Installed and managed by bench.
 ]
 

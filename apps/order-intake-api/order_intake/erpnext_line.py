@@ -53,3 +53,23 @@ class ERPNextLineWorkflow:
             "created": erpnext.get("created"),
             "customer": customer,
         }
+
+    def handle_attachment(
+        self,
+        *,
+        line_id: str,
+        message_id: str,
+        event_id: str,
+        content_type: str,
+    ) -> dict[str, Any]:
+        """Forward a LINE attachment reference; ERPNext owns token and file storage."""
+        if not self.client.configured:
+            raise ERPNextError("ERPNext credentials are required for LINE payment slips")
+        result = self.client.call_method(
+            "nextgen_erp.api.handle_line_payment_slip",
+            line_id=line_id,
+            message_id=message_id,
+            event_id=event_id,
+            content_type=content_type,
+        )
+        return {"kind": "payment_slip", **(result if isinstance(result, dict) else {})}

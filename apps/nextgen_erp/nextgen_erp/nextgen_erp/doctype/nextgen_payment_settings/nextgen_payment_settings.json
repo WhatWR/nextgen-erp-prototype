@@ -1,0 +1,66 @@
+{
+ "actions": [],
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "promptpay_id",
+  "promptpay_name",
+  "delivery_team_line_id",
+  "slip_verification_url",
+  "slip_verification_api_key",
+  "slip_confidence_threshold"
+ ],
+ "fields": [
+  {
+   "description": "Phone, national/tax ID, or e-wallet ID used to generate amount-locked QR codes",
+   "fieldname": "promptpay_id",
+   "fieldtype": "Data",
+   "label": "PromptPay ID"
+  },
+  {
+   "fieldname": "promptpay_name",
+   "fieldtype": "Data",
+   "label": "PromptPay Account Name"
+  },
+  {
+   "fieldname": "delivery_team_line_id",
+   "fieldtype": "Data",
+   "label": "Delivery Team LINE User/Group ID"
+  },
+  {
+   "fieldname": "slip_verification_url",
+   "fieldtype": "Data",
+   "label": "AI Slip Verification URL"
+  },
+  {
+   "fieldname": "slip_verification_api_key",
+   "fieldtype": "Password",
+   "label": "AI Slip Verification API Key"
+  },
+  {
+   "default": "0.95",
+   "fieldname": "slip_confidence_threshold",
+   "fieldtype": "Float",
+   "label": "Slip Auto-approval Confidence"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "module": "NextGen ERP",
+ "name": "NextGen Payment Settings",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

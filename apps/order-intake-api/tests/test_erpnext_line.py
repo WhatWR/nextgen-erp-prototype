@@ -21,6 +21,24 @@ class FakeClient:
 
 
 class ERPNextLineWorkflowTest(unittest.TestCase):
+    def test_image_is_forwarded_as_payment_slip(self):
+        client = FakeClient(
+            {
+                "nextgen_erp.api.handle_line_payment_slip": [
+                    {"handled": True, "name": "AIO-3", "status": "Payment Review"}
+                ]
+            }
+        )
+        result = ERPNextLineWorkflow(client).handle_attachment(
+            line_id="U123",
+            message_id="image-1",
+            event_id="evt-image-1",
+            content_type="image",
+        )
+        self.assertEqual(result["kind"], "payment_slip")
+        self.assertEqual(result["name"], "AIO-3")
+        self.assertEqual(client.calls[0][1]["message_id"], "image-1")
+
     def test_customer_confirmation_reply_never_becomes_a_new_order(self):
         client = FakeClient(
             {"nextgen_erp.api.handle_line_reply": [{"handled": True, "name": "AIO-1", "status": "Reserved"}]}

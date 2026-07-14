@@ -24,6 +24,7 @@ def run():
     _order_intake()
     _line_customer_map()
     _automation_settings()
+    _payment_settings()
     _line_settings()
     card_map = _number_cards()
     _workspace(card_map)
@@ -126,7 +127,13 @@ def _line_settings():
     )
 
 
-CARD_STATUSES = ["Needs Review", "Awaiting Customer", "Reserved", "Paid"]
+CARD_STATUSES = [
+    "Needs Review",
+    "Awaiting Customer",
+    "Awaiting Payment",
+    "Payment Review",
+    "Ready for Delivery",
+]
 
 
 def _number_cards() -> dict:
@@ -166,9 +173,10 @@ def _workspace(card_map: dict):
     content = [
         {"id": "logo", "type": "paragraph", "data": {"text": '<img src="/assets/nextgen_erp/images/nextgen-logo.svg" alt="NextGen Order AI" style="height:44px">', "col": 12}},
         {"id": "hdr", "type": "header", "data": {"text": '<span class="h4">Order Intake</span>', "col": 12}},
-        {"id": "sc1", "type": "shortcut", "data": {"shortcut_name": "Review Queue", "col": 4}},
-        {"id": "sc2", "type": "shortcut", "data": {"shortcut_name": "LINE Channel Settings", "col": 4}},
-        {"id": "sc3", "type": "shortcut", "data": {"shortcut_name": "Automation Settings", "col": 4}},
+        {"id": "sc1", "type": "shortcut", "data": {"shortcut_name": "Review Queue", "col": 3}},
+        {"id": "sc2", "type": "shortcut", "data": {"shortcut_name": "LINE Channel Settings", "col": 3}},
+        {"id": "sc3", "type": "shortcut", "data": {"shortcut_name": "Automation Settings", "col": 3}},
+        {"id": "sc4", "type": "shortcut", "data": {"shortcut_name": "Payment Settings", "col": 3}},
     ]
     content += [
         {"id": f"nc{i}", "type": "number_card", "data": {"number_card_name": name, "col": 3}}
@@ -189,6 +197,7 @@ def _workspace(card_map: dict):
                 {"label": "Review Queue", "link_to": "AI Order Intake", "type": "DocType", "color": "Orange"},
                 {"label": "LINE Channel Settings", "link_to": "LINE Channel Settings", "type": "DocType", "color": "Green"},
                 {"label": "Automation Settings", "link_to": "NextGen Automation Settings", "type": "DocType", "color": "Grey"},
+                {"label": "Payment Settings", "link_to": "NextGen Payment Settings", "type": "DocType", "color": "Blue"},
             ],
             "links": [
                 {"label": "Order Intake", "type": "Card Break"},
@@ -197,6 +206,7 @@ def _workspace(card_map: dict):
                 {"label": "Integrations", "type": "Card Break"},
                 {"label": "LINE Channel Settings", "link_to": "LINE Channel Settings", "link_type": "DocType", "type": "Link"},
                 {"label": "NextGen Automation Settings", "link_to": "NextGen Automation Settings", "link_type": "DocType", "type": "Link"},
+                {"label": "NextGen Payment Settings", "link_to": "NextGen Payment Settings", "link_type": "DocType", "type": "Link"},
             ],
         }
     ).insert(ignore_permissions=True)
@@ -252,7 +262,7 @@ def _order_intake():
                 {"fieldname": "idempotency_key", "label": "Idempotency Key", "fieldtype": "Data", "unique": 1, "reqd": 1},
                 {"fieldname": "source_text", "label": "Source Message", "fieldtype": "Small Text"},
                 {"fieldname": "sb_review", "label": "Review", "fieldtype": "Section Break"},
-                {"fieldname": "status", "label": "Status", "fieldtype": "Select", "options": "Needs Review\nReady\nAwaiting Customer\nReserved\nAwaiting Payment\nPaid\nRejected", "default": "Needs Review", "in_list_view": 1, "in_standard_filter": 1},
+                {"fieldname": "status", "label": "Status", "fieldtype": "Select", "options": "Needs Review\nReady\nAwaiting Customer\nReserved\nAwaiting Payment\nPayment Review\nReady for Delivery\nDelivered\nPaid\nRejected", "default": "Needs Review", "in_list_view": 1, "in_standard_filter": 1},
                 {"fieldname": "automation_mode", "label": "Automation Mode", "fieldtype": "Select", "options": "automatic\nhuman_review", "default": "human_review"},
                 {"fieldname": "confidence", "label": "Confidence", "fieldtype": "Float", "in_list_view": 1},
                 {"fieldname": "cb2", "fieldtype": "Column Break"},
@@ -269,6 +279,12 @@ def _order_intake():
                 {"fieldname": "cb3", "fieldtype": "Column Break"},
                 {"fieldname": "sales_invoice", "label": "Sales Invoice", "fieldtype": "Link", "options": "Sales Invoice", "read_only": 1},
                 {"fieldname": "payment_entry", "label": "Payment Entry", "fieldtype": "Link", "options": "Payment Entry", "read_only": 1},
+                {"fieldname": "sb_payment", "label": "Payment Verification", "fieldtype": "Section Break"},
+                {"fieldname": "payment_slip", "label": "Payment Slip", "fieldtype": "Attach", "read_only": 1},
+                {"fieldname": "payment_verification_status", "label": "Verification Status", "fieldtype": "Select", "options": "\nNeeds Review\nVerified\nRejected", "read_only": 1},
+                {"fieldname": "payment_verification_confidence", "label": "Verification Confidence", "fieldtype": "Float", "read_only": 1},
+                {"fieldname": "payment_reference", "label": "Payment Reference", "fieldtype": "Data", "read_only": 1},
+                {"fieldname": "payment_verification_note", "label": "Verification Note", "fieldtype": "Small Text", "read_only": 1},
             ],
             "permissions": [
                 {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1, "report": 1, "export": 1, "share": 1},
@@ -310,6 +326,27 @@ def _automation_settings():
                 {"fieldname": "invoice_link_days", "label": "Invoice Link Validity (Days)", "fieldtype": "Int", "default": 7},
                 {"fieldname": "external_service_url", "label": "External Service URL", "fieldtype": "Data", "description": "order-intake-api base URL for LINE reply webhooks"},
                 {"fieldname": "external_service_api_key", "label": "External Service API Key", "fieldtype": "Password"},
+            ],
+            "permissions": [
+                {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},
+            ],
+        }
+    )
+
+
+def _payment_settings():
+    _make(
+        {
+            "name": "NextGen Payment Settings",
+            "module": MODULE,
+            "issingle": 1,
+            "fields": [
+                {"fieldname": "promptpay_id", "label": "PromptPay ID", "fieldtype": "Data", "description": "Phone, national/tax ID, or e-wallet ID used to generate amount-locked QR codes"},
+                {"fieldname": "promptpay_name", "label": "PromptPay Account Name", "fieldtype": "Data"},
+                {"fieldname": "delivery_team_line_id", "label": "Delivery Team LINE User/Group ID", "fieldtype": "Data"},
+                {"fieldname": "slip_verification_url", "label": "AI Slip Verification URL", "fieldtype": "Data"},
+                {"fieldname": "slip_verification_api_key", "label": "AI Slip Verification API Key", "fieldtype": "Password"},
+                {"fieldname": "slip_confidence_threshold", "label": "Slip Auto-approval Confidence", "fieldtype": "Float", "default": 0.95},
             ],
             "permissions": [
                 {"role": "System Manager", "read": 1, "write": 1, "create": 1, "delete": 1},

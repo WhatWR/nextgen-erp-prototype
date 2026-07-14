@@ -20,11 +20,13 @@ from __future__ import annotations
 import base64
 import hashlib
 import hmac
+import io
 import json
 import time
 from urllib.parse import quote, urlparse
 
 import frappe
+import requests
 from frappe import _
 from frappe.utils import flt, get_url, nowdate
 
@@ -162,10 +164,22 @@ def _line_message(doc) -> str:
     if doc.status == "Awaiting Customer":
         return f"กรุณายืนยันออเดอร์ {doc.name}: {item_text} ยอดประมาณ {doc.total:,.2f} บาท ตอบ ‘ยืนยัน’ หรือ ‘ยกเลิก’"
     if doc.status == "Reserved":
-        return f"ยืนยันออเดอร์ {doc.name} แล้ว สินค้าถูกจองและกำลังจัดเตรียมส่งค่ะ"
+        return f"ยืนยันออเดอร์ {doc.name} แล้ว สินค้าถูกจองและกำลังสร้างใบแจ้งหนี้ค่ะ"
     if doc.status == "Awaiting Payment":
         link = make_invoice_download_url(doc.sales_invoice, doc.line_ref) if doc.sales_invoice else ""
-        return f"จัดส่งออเดอร์ {doc.name} แล้ว ใบแจ้งหนี้ {doc.sales_invoice}: {link}".strip()
+        settings = frappe.get_single("NextGen Payment Settings")
+        promptpay = f" PromptPay: {settings.promptpay_id}" if settings.promptpay_id else ""
+        return (
+            f"ยืนยันออเดอร์ {doc.name} แล้ว ใบแจ้งหนี้ {doc.sales_invoice} "
+            f"ยอด {doc.total:,.2f} บาท{promptpay}\n{link}\n"
+            "กรุณาชำระผ่าน QR และแนบรูปสลิปในแชตนี้ค่ะ"
+        ).strip()
+    if doc.status == "Payment Review":
+        return f"ได้รับสลิปสำหรับออเดอร์ {doc.name} แล้ว ระบบกำลังตรวจสอบการชำระเงินค่ะ"
+    if doc.status == "Ready for Delivery":
+        return f"ตรวจสอบการชำระเงินออเดอร์ {doc.name} สำเร็จแล้ว กำลังส่งสินค้าให้ทีมจัดส่งค่ะ"
+    if doc.status == "Delivered":
+        return f"จัดส่งออเดอร์ {doc.name} เรียบร้อยแล้ว ขอบคุณที่ใช้บริการค่ะ"
     if doc.status == "Paid":
         link = make_invoice_download_url(doc.sales_invoice, doc.line_ref) if doc.sales_invoice else ""
         return f"ได้รับชำระเงินออเดอร์ {doc.name} แล้ว ขอบคุณค่ะ ใบเสร็จ/ใบแจ้งหนี้: {link}".strip()
@@ -177,12 +191,35 @@ def _line_message(doc) -> str:
 def _queue_line_notification(doc) -> None:
     if not doc.line_ref:
         return
+    image_url = None
+    if doc.status == "Awaiting Payment" and doc.sales_invoice:
+        image_url = make_promptpay_qr_url(doc.sales_invoice, doc.line_ref)
     frappe.enqueue(
         "nextgen_erp.line.push_text",
         queue="short",
         enqueue_after_commit=True,
         recipient=doc.line_ref,
         text=_line_message(doc),
+        image_url=image_url,
+    )
+
+
+def _queue_delivery_team_notification(doc) -> None:
+    settings = frappe.get_single("NextGen Payment Settings")
+    recipient = settings.delivery_team_line_id
+    if not recipient or not doc.delivery_note:
+        return
+    link = make_delivery_note_download_url(doc.delivery_note)
+    frappe.enqueue(
+        "nextgen_erp.line.push_text",
+        queue="short",
+        enqueue_after_commit=True,
+        recipient=recipient,
+        text=(
+            f"ออเดอร์พร้อมจัดส่ง {doc.name}\n"
+            f"Delivery Note: {doc.delivery_note}\n"
+            f"ลูกค้า: {doc.customer}\n{link}"
+        ),
     )
 
 
@@ -305,6 +342,41 @@ def _make_pick_list(sales_order: str) -> str:
             )
         )
     return pl.name
+
+
+@frappe.whitelist()
+def create_invoice_from_sales_order(external_reference: str, sales_order: str):
+    """Create and submit a Sales Invoice before delivery (payment-first flow)."""
+    _require_operations_role()
+    invoice_ref = f"{external_reference}:invoice"
+    existing = _existing_by_reference("Sales Invoice", invoice_ref)
+    if existing:
+        return {"sales_invoice": existing.name, "already": True}
+
+    from erpnext.selling.doctype.sales_order.sales_order import make_sales_invoice
+
+    invoice = make_sales_invoice(sales_order)
+    _set_external_reference(invoice, invoice_ref)
+    invoice.insert()
+    invoice.submit()
+    return {"sales_invoice": invoice.name}
+
+
+@frappe.whitelist()
+def create_draft_delivery_note(external_reference: str, sales_order: str):
+    """Create a draft Delivery Note after payment; delivery submits it later."""
+    _require_operations_role()
+    delivery_ref = f"{external_reference}:delivery"
+    existing = _existing_by_reference("Delivery Note", delivery_ref)
+    if existing:
+        return {"delivery_note": existing.name, "already": True}
+
+    from erpnext.selling.doctype.sales_order.sales_order import make_delivery_note
+
+    delivery_note = make_delivery_note(sales_order)
+    _set_external_reference(delivery_note, delivery_ref)
+    delivery_note.insert()
+    return {"delivery_note": delivery_note.name}
 
 
 @frappe.whitelist()
@@ -489,7 +561,14 @@ def approve_ai_order_intake(name: str, reviewer: str | None = None, note: str | 
     """Human approval — move a reviewed intake to Awaiting Customer."""
     _require_operations_role()
     doc = _lock_intake(name)
-    if doc.status in ("Reserved", "Awaiting Payment", "Paid"):
+    if doc.status in (
+        "Reserved",
+        "Awaiting Payment",
+        "Payment Review",
+        "Ready for Delivery",
+        "Delivered",
+        "Paid",
+    ):
         return {"name": name, "status": doc.status, "already": True}
     doc.status = "Awaiting Customer"
     doc.reviewer = reviewer or frappe.session.user
@@ -509,7 +588,7 @@ def approve_ai_order_intake(name: str, reviewer: str | None = None, note: str | 
 
 @frappe.whitelist()
 def record_customer_confirmation(name: str, confirmed: int = 1):
-    """Customer confirmation — on yes, create SO + reserve; on no, reject."""
+    """Customer confirmation — reserve stock, invoice, and request payment."""
     _require_operations_role()
     doc = _lock_intake(name)
     if not int(confirmed or 0):
@@ -520,9 +599,15 @@ def record_customer_confirmation(name: str, confirmed: int = 1):
         _queue_line_notification(doc)
         return {"name": name, "status": doc.status}
 
-    if doc.sales_order:
-        return {"name": name, "status": doc.status, "sales_order": doc.sales_order, "already": True}
-    if doc.status != "Awaiting Customer":
+    if doc.sales_invoice:
+        return {
+            "name": name,
+            "status": doc.status,
+            "sales_order": doc.sales_order,
+            "sales_invoice": doc.sales_invoice,
+            "already": True,
+        }
+    if doc.status not in ("Awaiting Customer", "Reserved"):
         frappe.throw(_("Intake must be Awaiting Customer before confirmation"))
 
     company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
@@ -534,40 +619,44 @@ def record_customer_confirmation(name: str, confirmed: int = 1):
         {"item_code": r.item, "qty": r.qty, "uom": r.uom, "rate": r.rate}
         for r in doc.items
     ]
-    result = create_sales_order(
-        external_reference=doc.name,
-        customer=doc.customer,
-        company=company,
-        currency="THB",
-        delivery_date=nowdate(),
-        items=items,
-        reserve_stock=1,
-    )
-    doc.sales_order = result["sales_order"]
-    doc.pick_list = result.get("pick_list")
-    doc.status = "Reserved"
+    result = {}
+    if not doc.sales_order:
+        result = create_sales_order(
+            external_reference=doc.name,
+            customer=doc.customer,
+            company=company,
+            currency="THB",
+            delivery_date=nowdate(),
+            items=items,
+            reserve_stock=1,
+        )
+        doc.sales_order = result["sales_order"]
+        doc.pick_list = result.get("pick_list")
+        doc.status = "Reserved"
+        _save_intake(doc)
+    invoice = create_invoice_from_sales_order(doc.name, doc.sales_order)
+    doc.sales_invoice = invoice["sales_invoice"]
+    doc.status = "Awaiting Payment"
     _save_intake(doc)
     _queue_line_notification(doc)
-    return {"name": name, "status": doc.status, **result}
+    return {"name": name, "status": doc.status, **result, **invoice}
 
 
 @frappe.whitelist()
 def progress_delivery(name: str):
-    """Create Delivery Note + Sales Invoice for a reserved intake."""
+    """Compatibility action: move a legacy Reserved intake to payment-first invoicing."""
     _require_operations_role()
     doc = _lock_intake(name)
-    if doc.delivery_note and doc.sales_invoice:
+    if doc.sales_invoice:
         return {
             "name": name,
             "status": doc.status,
-            "delivery_note": doc.delivery_note,
             "sales_invoice": doc.sales_invoice,
             "already": True,
         }
     if doc.status != "Reserved":
         frappe.throw(_("Intake must be Reserved before delivery"))
-    result = deliver_and_invoice(external_reference=doc.name, sales_order=doc.sales_order, pick_list=doc.pick_list)
-    doc.delivery_note = result["delivery_note"]
+    result = create_invoice_from_sales_order(doc.name, doc.sales_order)
     doc.sales_invoice = result["sales_invoice"]
     doc.status = "Awaiting Payment"
     _save_intake(doc)
@@ -577,35 +666,58 @@ def progress_delivery(name: str):
 
 @frappe.whitelist()
 def progress_payment(name: str, reference_no: str | None = None):
-    """Record a Payment Entry for an invoiced intake."""
+    """Allocate verified payment, prepare a draft Delivery Note, notify both parties."""
     _require_operations_role()
     doc = _lock_intake(name)
-    if doc.payment_entry:
+    if doc.payment_entry and doc.delivery_note:
         return {
             "name": name,
             "status": doc.status,
             "payment_entry": doc.payment_entry,
             "already": True,
         }
-    if doc.status != "Awaiting Payment":
+    if doc.status not in ("Awaiting Payment", "Payment Review"):
         frappe.throw(_("Intake must be Awaiting Payment before recording payment"))
     company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
         "Global Defaults", "default_company"
     )
-    result = record_payment(
-        external_reference=doc.name,
-        company=company,
-        customer=doc.customer,
-        currency="THB",
-        amount=doc.total,
-        reference_no=reference_no,
-        sales_invoice=doc.sales_invoice,
-    )
-    doc.payment_entry = result["payment_entry"]
-    doc.status = "Paid"
+    result = {}
+    if not doc.payment_entry:
+        result = record_payment(
+            external_reference=doc.name,
+            company=company,
+            customer=doc.customer,
+            currency="THB",
+            amount=doc.total,
+            reference_no=reference_no,
+            sales_invoice=doc.sales_invoice,
+        )
+        doc.payment_entry = result["payment_entry"]
+    delivery = create_draft_delivery_note(doc.name, doc.sales_order)
+    doc.delivery_note = delivery["delivery_note"]
+    doc.status = "Ready for Delivery"
     _save_intake(doc)
     _queue_line_notification(doc)
-    return {"name": name, "status": doc.status, **result}
+    _queue_delivery_team_notification(doc)
+    return {"name": name, "status": doc.status, **result, **delivery}
+
+
+@frappe.whitelist()
+def complete_delivery(name: str):
+    """Delivery-team completion submits the prepared Delivery Note."""
+    _require_operations_role()
+    doc = _lock_intake(name)
+    if doc.status == "Delivered":
+        return {"name": name, "status": doc.status, "already": True}
+    if doc.status != "Ready for Delivery" or not doc.delivery_note:
+        frappe.throw(_("Intake must be Ready for Delivery"))
+    delivery_note = frappe.get_doc("Delivery Note", doc.delivery_note)
+    if delivery_note.docstatus == 0:
+        delivery_note.submit()
+    doc.status = "Delivered"
+    _save_intake(doc)
+    _queue_line_notification(doc)
+    return {"name": name, "status": doc.status, "delivery_note": doc.delivery_note}
 
 
 # --------------------------------------------------------------------------- #
@@ -685,6 +797,137 @@ def handle_line_reply(line_id: str, text: str, event_id: str | None = None):
             }
         ).insert()
     return response
+
+
+def _verify_payment_slip(content: bytes, doc) -> dict:
+    """Call the configured AI slip adapter; never infer payment from an image alone."""
+    settings = frappe.get_single("NextGen Payment Settings")
+    url = (settings.slip_verification_url or "").strip()
+    if not url:
+        return {"verified": False, "confidence": 0, "reason": "verifier_not_configured"}
+    headers = {"Content-Type": "application/json"}
+    token = settings.get_password("slip_verification_api_key", raise_exception=False) or ""
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    response = requests.post(
+        url,
+        headers=headers,
+        json={
+            "image_base64": base64.b64encode(content).decode(),
+            "expected_amount": flt(doc.total),
+            "currency": "THB",
+            "invoice": doc.sales_invoice,
+            "customer": doc.customer,
+        },
+        timeout=30,
+    )
+    response.raise_for_status()
+    result = response.json()
+    confidence = flt(result.get("confidence"))
+    amount = flt(result.get("amount"))
+    threshold = flt(settings.slip_confidence_threshold or 0.95)
+    amount_matches = abs(amount - flt(doc.total)) <= 0.01
+    return {
+        "verified": bool(result.get("verified") and confidence >= threshold and amount_matches),
+        "confidence": confidence,
+        "amount": amount,
+        "reference_no": str(result.get("reference_no") or result.get("transaction_id") or ""),
+        "reason": result.get("reason") or (None if amount_matches else "amount_mismatch"),
+    }
+
+
+@frappe.whitelist()
+def handle_line_payment_slip(
+    line_id: str,
+    message_id: str,
+    event_id: str | None = None,
+    content_type: str = "image",
+):
+    """Download a verified LINE image, attach it to the open invoice, and assess it."""
+    _require_service_role()
+    if content_type != "image" or not message_id:
+        frappe.throw(_("A LINE image message is required"))
+    if event_id:
+        existing = frappe.db.get_value("LINE Event Receipt", event_id, "result_json")
+        if existing:
+            result = json.loads(existing)
+            result["duplicate"] = True
+            return result
+    name = frappe.db.get_value(
+        "AI Order Intake",
+        {"line_ref": line_id, "status": ["in", ["Awaiting Payment", "Payment Review"]]},
+        "name",
+        order_by="modified desc",
+    )
+    if not name:
+        return {"handled": False, "reason": "no_invoice_awaiting_payment"}
+    doc = frappe.get_doc("AI Order Intake", name)
+    line_settings = frappe.get_single("LINE Channel Settings")
+    access_token = line_settings.get_password("channel_access_token", raise_exception=False) or ""
+    if not access_token:
+        frappe.throw(_("LINE Channel Access Token is required to download payment slips"))
+    response = requests.get(
+        f"https://api-data.line.me/v2/bot/message/{quote(message_id, safe='')}/content",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    content = response.content
+    if not content or len(content) > 10 * 1024 * 1024:
+        frappe.throw(_("Payment slip must be a non-empty image smaller than 10 MB"))
+    file_doc = frappe.get_doc(
+        {
+            "doctype": "File",
+            "file_name": f"line-slip-{message_id}.jpg",
+            "is_private": 1,
+            "content": content,
+            "attached_to_doctype": "AI Order Intake",
+            "attached_to_name": name,
+            "attached_to_field": "payment_slip",
+        }
+    ).insert(ignore_permissions=True)
+    doc.payment_slip = file_doc.file_url
+    try:
+        verification = _verify_payment_slip(content, doc)
+    except Exception:
+        frappe.log_error(frappe.get_traceback(), "NextGen slip verification failed")
+        verification = {"verified": False, "confidence": 0, "reason": "verifier_error"}
+    doc.payment_verification_confidence = verification.get("confidence") or 0
+    doc.payment_reference = verification.get("reference_no")
+    doc.payment_verification_note = verification.get("reason")
+    doc.payment_verification_status = "Verified" if verification.get("verified") else "Needs Review"
+    doc.status = "Payment Review"
+    _save_intake(doc)
+    if verification.get("verified"):
+        result = progress_payment(name, verification.get("reference_no") or f"LINE-{event_id or message_id}")
+        result.update({"handled": True, "verification": verification})
+    else:
+        _queue_line_notification(doc)
+        result = {"handled": True, "name": name, "status": doc.status, "verification": verification}
+    if event_id:
+        frappe.get_doc(
+            {
+                "doctype": "LINE Event Receipt",
+                "event_id": event_id,
+                "line_id": line_id,
+                "result_json": json.dumps(result, ensure_ascii=False),
+            }
+        ).insert()
+    return result
+
+
+@frappe.whitelist()
+def approve_payment_slip(name: str, reference_no: str):
+    """Human fallback for a low-confidence or unavailable slip verifier."""
+    _require_operations_role()
+    doc = _lock_intake(name)
+    if doc.status != "Payment Review":
+        frappe.throw(_("Intake must be in Payment Review"))
+    doc.payment_verification_status = "Verified"
+    doc.payment_reference = reference_no
+    doc.reviewer = frappe.session.user
+    _save_intake(doc)
+    return progress_payment(name, reference_no)
 
 
 @frappe.whitelist()
@@ -788,26 +1031,136 @@ def make_invoice_download_url(invoice: str, line_ref: str | None = None) -> str:
     return f"{get_url()}/api/method/nextgen_erp.api.download_invoice?token={quote(token)}"
 
 
+def _decode_invoice_token(token: str) -> dict:
+    encoded, supplied_signature = token.rsplit(".", 1)
+    key = frappe.get_site_config().encryption_key.encode()
+    expected = hmac.new(key, encoded.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected, supplied_signature):
+        raise ValueError("bad signature")
+    raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+    payload = json.loads(raw)
+    if int(payload.get("expires") or 0) < int(time.time()):
+        raise ValueError("expired")
+    invoice = str(payload.get("invoice") or "")
+    if not invoice or not frappe.db.exists("Sales Invoice", invoice):
+        raise ValueError("missing invoice")
+    return payload
+
+
 @frappe.whitelist(allow_guest=True)
 def download_invoice(token: str):
     """Download an invoice through an expiring, tamper-evident LINE link."""
     try:
-        encoded, supplied_signature = token.rsplit(".", 1)
-        key = frappe.get_site_config().encryption_key.encode()
-        expected = hmac.new(key, encoded.encode(), hashlib.sha256).hexdigest()
-        if not hmac.compare_digest(expected, supplied_signature):
-            raise ValueError("bad signature")
-        raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
-        payload = json.loads(raw)
-        if int(payload.get("expires") or 0) < int(time.time()):
-            raise ValueError("expired")
+        payload = _decode_invoice_token(token)
         invoice = str(payload.get("invoice") or "")
-        if not invoice or not frappe.db.exists("Sales Invoice", invoice):
-            raise ValueError("missing invoice")
     except (ValueError, TypeError, json.JSONDecodeError):
         frappe.throw(_("This invoice link is invalid or expired"), frappe.PermissionError)
     frappe.local.response.filename = f"{invoice}.pdf"
     frappe.local.response.filecontent = frappe.get_print("Sales Invoice", invoice, as_pdf=True)
+    frappe.local.response.type = "pdf"
+    return None
+
+
+def _emv(tag: str, value: str) -> str:
+    return f"{tag}{len(value):02d}{value}"
+
+
+def _promptpay_payload(promptpay_id: str, amount: float) -> str:
+    proxy = "".join(character for character in (promptpay_id or "") if character.isdigit())
+    if len(proxy) == 10:
+        proxy_tag = "01"
+        proxy = "0066" + proxy[-9:]
+    elif len(proxy) == 13:
+        proxy_tag = "02"
+    elif len(proxy) == 15:
+        proxy_tag = "03"
+    else:
+        frappe.throw(_("PromptPay ID must be a 10-digit phone, 13-digit national/tax ID, or 15-digit e-wallet ID"))
+    merchant_account = _emv("00", "A000000677010111") + _emv(proxy_tag, proxy)
+    payload = "".join(
+        [
+            _emv("00", "01"),
+            _emv("01", "12"),
+            _emv("29", merchant_account),
+            _emv("53", "764"),
+            _emv("54", f"{flt(amount):.2f}"),
+            _emv("58", "TH"),
+            "6304",
+        ]
+    )
+    crc = 0xFFFF
+    for byte in payload.encode("ascii"):
+        crc ^= byte << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+    return f"{payload}{crc:04X}"
+
+
+def make_promptpay_qr_url(invoice: str, line_ref: str | None = None) -> str | None:
+    if not frappe.db.get_single_value("NextGen Payment Settings", "promptpay_id"):
+        return None
+    days = int(frappe.db.get_single_value("NextGen Automation Settings", "invoice_link_days") or 7)
+    token = _invoice_token(invoice, line_ref, int(time.time()) + days * 86400)
+    return f"{get_url()}/api/method/nextgen_erp.api.promptpay_qr?token={quote(token)}"
+
+
+@frappe.whitelist(allow_guest=True)
+def promptpay_qr(token: str):
+    """Serve a signed, amount-locked PromptPay QR as a PNG for LINE."""
+    try:
+        payload = _decode_invoice_token(token)
+        invoice = str(payload["invoice"])
+        amount = flt(frappe.db.get_value("Sales Invoice", invoice, "grand_total"))
+        promptpay_id = frappe.db.get_single_value("NextGen Payment Settings", "promptpay_id") or ""
+        value = _promptpay_payload(promptpay_id, amount)
+    except (ValueError, TypeError, json.JSONDecodeError):
+        frappe.throw(_("This PromptPay QR link is invalid or expired"), frappe.PermissionError)
+    import qrcode
+
+    image = qrcode.make(value)
+    output = io.BytesIO()
+    image.save(output, format="PNG")
+    frappe.local.response.filename = f"promptpay-{invoice}.png"
+    frappe.local.response.filecontent = output.getvalue()
+    frappe.local.response.type = "download"
+    return None
+
+
+def _delivery_note_token(delivery_note: str, expires: int) -> str:
+    payload = json.dumps(
+        {"delivery_note": delivery_note, "expires": expires}, separators=(",", ":")
+    ).encode()
+    encoded = base64.urlsafe_b64encode(payload).decode().rstrip("=")
+    signature = hmac.new(
+        frappe.get_site_config().encryption_key.encode(), encoded.encode(), hashlib.sha256
+    ).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def make_delivery_note_download_url(delivery_note: str) -> str:
+    token = _delivery_note_token(delivery_note, int(time.time()) + 7 * 86400)
+    return f"{get_url()}/api/method/nextgen_erp.api.download_delivery_note?token={quote(token)}"
+
+
+@frappe.whitelist(allow_guest=True)
+def download_delivery_note(token: str):
+    try:
+        encoded, supplied_signature = token.rsplit(".", 1)
+        expected = hmac.new(
+            frappe.get_site_config().encryption_key.encode(), encoded.encode(), hashlib.sha256
+        ).hexdigest()
+        if not hmac.compare_digest(expected, supplied_signature):
+            raise ValueError("bad signature")
+        payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        if int(payload.get("expires") or 0) < int(time.time()):
+            raise ValueError("expired")
+        delivery_note = str(payload.get("delivery_note") or "")
+        if not delivery_note or not frappe.db.exists("Delivery Note", delivery_note):
+            raise ValueError("missing delivery note")
+    except (ValueError, TypeError, json.JSONDecodeError):
+        frappe.throw(_("This Delivery Note link is invalid or expired"), frappe.PermissionError)
+    frappe.local.response.filename = f"{delivery_note}.pdf"
+    frappe.local.response.filecontent = frappe.get_print("Delivery Note", delivery_note, as_pdf=True)
     frappe.local.response.type = "pdf"
     return None
 

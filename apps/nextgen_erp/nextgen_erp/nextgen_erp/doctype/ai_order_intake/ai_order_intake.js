@@ -35,8 +35,8 @@ frappe.ui.form.on("AI Order Intake", {
 		}
 
 		if (status === "Reserved") {
-			frm.add_custom_button(__("Deliver & Invoice"), () =>
-				call("progress_delivery", { name: frm.doc.name }, __("Delivering...")),
+			frm.add_custom_button(__("Create Invoice"), () =>
+				call("progress_delivery", { name: frm.doc.name }, __("Creating invoice...")),
 			).addClass("btn-primary");
 		}
 
@@ -51,12 +51,32 @@ frappe.ui.form.on("AI Order Intake", {
 			}).addClass("btn-primary");
 		}
 
+		if (status === "Payment Review") {
+			frm.add_custom_button(__("Approve Payment Slip"), () => {
+				frappe.prompt(
+					[{ fieldname: "reference_no", label: __("Bank Reference"), fieldtype: "Data", reqd: 1 }],
+					(v) => call("approve_payment_slip", { name: frm.doc.name, reference_no: v.reference_no }, __("Approving payment...")),
+					__("Approve Payment Slip"),
+					__("Submit"),
+				);
+			}).addClass("btn-primary");
+		}
+
+		if (status === "Ready for Delivery") {
+			frm.add_custom_button(__("Complete Delivery"), () =>
+				call("complete_delivery", { name: frm.doc.name }, __("Completing delivery...")),
+			).addClass("btn-primary");
+		}
+
 		const colours = {
 			"Needs Review": "orange",
 			Ready: "blue",
 			"Awaiting Customer": "yellow",
 			Reserved: "purple",
 			"Awaiting Payment": "orange",
+			"Payment Review": "orange",
+			"Ready for Delivery": "blue",
+			Delivered: "green",
 			Paid: "green",
 			Rejected: "red",
 		};
