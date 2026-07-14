@@ -44,6 +44,39 @@ def create_service_user(email: str = "nextgen-order-service@local.invalid") -> d
 	return {"user": email, "roles": SERVICE_ROLES, "api_secret_generated": False}
 
 
+def configure_server_integration(
+	order_intake_api_key: str,
+	email: str = "nextgen-order-service@local.invalid",
+) -> dict:
+	"""Provision the server-side Order Intake identity and return its keys once.
+
+	This is intentionally not whitelisted. Run it only through ``bench execute``
+	as Administrator during server bootstrap, then put the returned API key and
+	secret in the ignored ``.env.server`` file. The transaction is committed so
+	the credentials are immediately valid for token authentication.
+	"""
+	from frappe.core.doctype.user.user import generate_keys
+
+	if frappe.session.user != "Administrator":
+		frappe.throw("Run this provisioning helper as Administrator", frappe.PermissionError)
+	if not order_intake_api_key:
+		frappe.throw("order_intake_api_key is required")
+
+	service = create_service_user(email)
+	keys = generate_keys(service["user"])
+	settings = frappe.get_single("NextGen Automation Settings")
+	settings.external_service_url = "http://order-intake:8200"
+	settings.external_service_api_key = order_intake_api_key
+	settings.save()
+	frappe.db.commit()
+	return {
+		"user": service["user"],
+		"roles": SERVICE_ROLES,
+		"api_key": keys["api_key"],
+		"api_secret": keys["api_secret"],
+	}
+
+
 def configure_local_environment(env_path: str) -> dict:
 	"""Generate local-only API credentials and write an ignored, mode-0600 env file.
 

@@ -70,20 +70,30 @@ docker compose --profile production up -d
 
 ## Complete the integration
 
-1. In ERPNext, create or open the dedicated user
-   `nextgen-order-service@local.invalid`, assign **NextGen Order Service**,
-   **Sales User**, **Stock User** and **Accounts User**, and generate its API key
-   and secret.
-2. Put those two values in `.env.server`, then apply them:
+1. Load `.env.server`, then run the administrator-only bootstrap helper. It
+   creates the least-privilege service user, commits its API credentials, and
+   configures ERPNext's internal Order Intake URL/key:
 
    ```bash
-   docker compose up -d order-intake
+   set -a
+   source .env.server
+   set +a
+   docker compose exec -T backend bench --site "$SITE_NAME" execute \
+     nextgen_erp.provision.configure_server_integration \
+     --kwargs "{\"order_intake_api_key\":\"$ORDER_INTAKE_API_KEY\"}"
    ```
 
-3. Open **NextGen Automation Settings** and set:
-   - External Service URL: `http://order-intake:8200`
-   - External Service API Key: the same `ORDER_INTAKE_API_KEY` from `.env.server`
-   - Confidence threshold and invoice-link lifetime
+2. Copy the returned `api_key` and `api_secret` into `ERPNEXT_API_KEY` and
+   `ERPNEXT_API_SECRET` in `.env.server`. The secret is shown only this time.
+   Recreate Order Intake so it receives them:
+
+   ```bash
+   docker compose up -d --force-recreate order-intake gateway
+   ```
+
+3. Open **NextGen Automation Settings** to choose the confidence threshold,
+   automatic routing policy and invoice-link lifetime. The internal service URL
+   and key were already set by the bootstrap helper.
 4. Open **LINE Channel Settings**, enter the LINE channel secret/access token,
    and use `YOUR_PUBLIC_URL/webhooks/line` as the LINE webhook URL. During the
    pilot, `YOUR_PUBLIC_URL` is the HTTPS URL displayed by ngrok.

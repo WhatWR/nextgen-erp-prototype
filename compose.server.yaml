@@ -169,16 +169,10 @@ services:
       context: .
       dockerfile: docker/order-intake/Dockerfile
     restart: unless-stopped
+    env_file:
+      - ${SERVER_ENV_FILE:-.env.server}
     environment:
       ERPNEXT_URL: http://frontend:8080
-      ERPNEXT_API_KEY: ${ERPNEXT_API_KEY:-}
-      ERPNEXT_API_SECRET: ${ERPNEXT_API_SECRET:-}
-      ERPNEXT_WAREHOUSE: ${ERPNEXT_WAREHOUSE:?Set ERPNEXT_WAREHOUSE in .env.server}
-      ORDER_INTAKE_API_KEY: ${ORDER_INTAKE_API_KEY:?Set ORDER_INTAKE_API_KEY in .env.server}
-      ORDER_BACKEND: ${ORDER_BACKEND:-erpnext}
-      LINE_CONFIG_SOURCE: ${LINE_CONFIG_SOURCE:-erpnext}
-      LINE_WORKFLOW_BACKEND: ${LINE_WORKFLOW_BACKEND:-erpnext}
-      ERPCLAW_BACKEND: ${ERPCLAW_BACKEND:-erpnext}
       ORDER_INTAKE_QUIET: "1"
       ORDER_INTAKE_AUTO_SEED: "0"
     depends_on:
