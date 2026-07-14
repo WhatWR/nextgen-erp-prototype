@@ -1,0 +1,9 @@
+# Default server entrypoint.
+#
+# Docker Compose only auto-loads a file named `.env`; our server secrets live in
+# `.env.server` so they do not collide with the local Bench environment.  The
+# include-level env_file makes those values available while compose.server.yaml
+# is interpolated, allowing normal `docker compose ...` commands to work.
+include:
+  - path: compose.server.yaml
+    env_file: ${SERVER_ENV_FILE:-.env.server}

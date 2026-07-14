@@ -18,6 +18,29 @@ from order_intake.line_integration import LineIntegrationStore
 from order_intake.service import OrderIntakeService
 
 
+class HandlerStartupTest(unittest.TestCase):
+    def test_erpnext_mode_does_not_initialize_legacy_erpclaw(self) -> None:
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            service = OrderIntakeService(root / "http.sqlite3", root / "exports")
+            integration = LineIntegrationStore(root / "line_integration.json")
+            with (
+                patch.dict(
+                    "os.environ",
+                    {
+                        "ENABLE_LEGACY_PROTOTYPE": "0",
+                        "LINE_WORKFLOW_BACKEND": "legacy",
+                    },
+                ),
+                patch(
+                    "order_intake.server.ERPClawIntegrationStore",
+                    side_effect=AssertionError("legacy ERPClaw must not initialize"),
+                ),
+            ):
+                handler = build_handler(service, integration)
+            self.assertTrue(issubclass(handler, object))
+
+
 class HttpTest(unittest.TestCase):
     def setUp(self) -> None:
         self.env = patch.dict(

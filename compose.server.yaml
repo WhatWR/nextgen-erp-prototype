@@ -96,21 +96,21 @@ services:
         wait-for-it -t 120 redis-cache:6379;
         wait-for-it -t 120 redis-queue:6379;
         if [ ! -f "sites/$${SITE_NAME}/site_config.json" ]; then
-          bench new-site "$${SITE_NAME}"
-          --mariadb-user-host-login-scope='%'
-          --admin-password "$${ADMIN_PASSWORD}"
-          --db-root-username root
-          --db-root-password "$${DB_ROOT_PASSWORD}"
-          --install-app erpnext
-          --install-app nextgen_erp
-          --set-default;
+          bench new-site "$${SITE_NAME}" \
+            --mariadb-user-host-login-scope='%' \
+            --admin-password "$${ADMIN_PASSWORD}" \
+            --db-root-username root \
+            --db-root-password "$${DB_ROOT_PASSWORD}" \
+            --install-app erpnext \
+            --install-app nextgen_erp \
+            --set-default;
         else
           bench --site "$${SITE_NAME}" migrate;
         fi;
-        bench --site "$${SITE_NAME}" set-config host_name "https://$${ERP_DOMAIN}"
+        bench --site "$${SITE_NAME}" set-config host_name "$${PUBLIC_URL}"
     environment:
       SITE_NAME: ${SITE_NAME:?Set SITE_NAME in .env.server}
-      ERP_DOMAIN: ${ERP_DOMAIN:?Set ERP_DOMAIN in .env.server}
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8180}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env.server}
       DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD in .env.server}
     networks: [internal]
@@ -188,12 +188,27 @@ services:
         condition: service_started
     networks: [internal]
 
+  gateway:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${HTTP_PORT:-8180}:8080"
+    volumes:
+      - ./docker/Caddyfile.gateway:/etc/caddy/Caddyfile:ro
+    depends_on:
+      frontend:
+        condition: service_started
+      order-intake:
+        condition: service_healthy
+    networks: [internal]
+
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    profiles: [production]
     environment:
-      ERP_DOMAIN: ${ERP_DOMAIN:?Set ERP_DOMAIN in .env.server}
-      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL in .env.server}
+      ERP_DOMAIN: ${ERP_DOMAIN:-localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
     ports:
       - "80:80"
       - "443:443"

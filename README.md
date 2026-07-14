@@ -36,7 +36,8 @@ Configure the LINE channel secret/token and the public HTTPS webhook URL in the
 See [the deployment and integration guide](docs/ERPNEXT_MIGRATION.md) for setup,
 security boundaries and test commands.
 
-For a Linux server, use [compose.server.yaml](compose.server.yaml) and follow the
+For a Linux server, use the default [compose.yaml](compose.yaml), which loads
+[compose.server.yaml](compose.server.yaml) with `.env.server`, and follow the
 [Docker server deployment guide](docs/DOCKER_SERVER.md).
 
 For local development with Dockerized MariaDB and Redis, run
