@@ -160,6 +160,22 @@ def _selling_rate(item_code: str, customer: str, price_list: str | None = None) 
 def _line_message(doc) -> str:
     item_text = ", ".join(f"{row.item_name or row.item} x {row.qty:g} {row.uom or ''}".strip() for row in doc.items)
     if doc.status == "Needs Review":
+        exceptions = _as_list(doc.exception_reasons)
+        inventory_not_found = "ไม่พบสินค้าที่ตรงกับข้อความ"
+        if inventory_not_found in exceptions or any(
+            row.exception_reason == inventory_not_found for row in doc.items
+        ):
+            missing_lines = [
+                (row.raw_text or "").strip()
+                for row in doc.items
+                if row.exception_reason == inventory_not_found and (row.raw_text or "").strip()
+            ]
+            missing_text = ", ".join(dict.fromkeys(missing_lines)) or (doc.source_text or "").strip()
+            return (
+                f"ขออภัยค่ะ ไม่พบสินค้าที่ตรงกับข้อความในออเดอร์ {doc.name}"
+                f"{f': {missing_text}' if missing_text else ''}\n"
+                "กรุณาตรวจสอบชื่อสินค้าแล้วส่งรายการใหม่ หรือรอเจ้าหน้าที่ช่วยตรวจสอบค่ะ"
+            )
         return f"รับออเดอร์แล้วค่ะ เลขที่ {doc.name} ระบบกำลังให้เจ้าหน้าที่ตรวจสอบรายการ: {item_text}"
     if doc.status == "Awaiting Customer":
         return f"กรุณายืนยันออเดอร์ {doc.name}: {item_text} ยอดประมาณ {doc.total:,.2f} บาท ตอบ ‘ยืนยัน’ หรือ ‘ยกเลิก’"
