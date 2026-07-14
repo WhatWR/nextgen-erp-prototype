@@ -191,9 +191,11 @@ app_logo_url = "/assets/nextgen_erp/images/nextgen-icon.svg"
 # Overriding Methods
 # ------------------------------
 #
-# override_whitelisted_methods = {
-# 	"frappe.desk.doctype.event.event.get_events": "nextgen_erp.event.get_events"
-# }
+override_whitelisted_methods = {
+	"frappe.desk.page.setup_wizard.setup_wizard.setup_complete": (
+		"nextgen_erp.api.setup_complete_with_thailand_defaults"
+	)
+}
 #
 # each overriding function accepts a `data` argument;
 # generated from the base implementation of the doctype dashboard,

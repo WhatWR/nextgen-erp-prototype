@@ -26,6 +26,9 @@ Edit `.env.server` and replace every `CHANGE_ME` value. A domain is not required
 for the first deployment. The default `compose.yaml` automatically loads
 `.env.server` and publishes a local-only gateway on `127.0.0.1:8180`:
 
+The Compose project name is fixed to `nextgen-erp`; do not start the same file
+with a different `-p` value or `COMPOSE_PROJECT_NAME`.
+
 ```bash
 docker compose config --quiet
 docker compose build

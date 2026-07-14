@@ -10,8 +10,12 @@ log() {
 }
 
 fail() {
-  printf '\nDeployment stopped: %s\n' "$*" >&2
-  exit 1
+	printf '\nDeployment stopped: %s\n' "$*" >&2
+	exit 1
+}
+
+compose() {
+	SERVER_ENV_FILE="$ENV_FILE" docker compose -p nextgen-erp "$@"
 }
 
 command -v git >/dev/null 2>&1 || fail "git is not installed"
@@ -46,15 +50,15 @@ else
 fi
 
 log "Validating Docker Compose configuration"
-SERVER_ENV_FILE="$ENV_FILE" docker compose config --quiet
+compose config --quiet
 
 log "Building application images"
-SERVER_ENV_FILE="$ENV_FILE" docker compose build --pull
+compose build --pull
 
 log "Starting ERPNext and applying site migrations"
-SERVER_ENV_FILE="$ENV_FILE" docker compose up -d --remove-orphans
+compose up -d --remove-orphans
 
 log "Deployment status"
-SERVER_ENV_FILE="$ENV_FILE" docker compose ps
+compose ps
 
 printf '\nDeployment complete at commit %s.\n' "$AFTER"

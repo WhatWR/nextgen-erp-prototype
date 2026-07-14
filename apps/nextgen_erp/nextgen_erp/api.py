@@ -34,6 +34,53 @@ OPERATIONS_ROLES = {"System Manager", "Sales Manager", "Sales User", SERVICE_ROL
 EXTERNAL_REFERENCE_FIELD = "custom_nextgen_external_reference"
 
 
+@frappe.whitelist()
+def setup_complete_with_thailand_defaults(args):
+    """Complete the ERPNext wizard even if its earlier regional slide was lost.
+
+    ERPNext v16's final organization slide can be reopened without the values
+    from the earlier regional slide.  Core ERPNext then dereferences a missing
+    country while installing fixtures.  Keep every submitted value and fill
+    only the missing Thailand-first defaults required by the setup stages.
+    """
+    from frappe.desk.page.setup_wizard.setup_wizard import get_language_code, setup_complete
+
+    if isinstance(args, str):
+        args = json.loads(args)
+    values = dict(args or {})
+    defaults = {
+        "language": "English",
+        "country": "Thailand",
+        "timezone": "Asia/Bangkok",
+        "currency": "THB",
+        "chart_of_accounts": "Standard",
+        "domain": "Distribution",
+        "setup_demo": 0,
+        "enable_telemetry": 0,
+    }
+    for key, value in defaults.items():
+        if values.get(key) in (None, ""):
+            values[key] = value
+
+    # A failed first attempt may leave the Frappe setup stage marked complete
+    # while these Single DocType values are still empty.  In that state core
+    # setup replaces the valid request values with the empty stored values
+    # before ERPNext installs its fixtures.  Persist the regional values first
+    # so both a fresh setup and a retry use the same non-empty configuration.
+    system_settings = frappe.get_single("System Settings")
+    system_settings.update(
+        {
+            "language": get_language_code(values["language"]) or "en",
+            "country": values["country"],
+            "time_zone": values["timezone"],
+            "currency": values["currency"],
+        }
+    )
+    system_settings.save(ignore_permissions=True)
+
+    return setup_complete(values)
+
+
 # --------------------------------------------------------------------------- #
 # Helpers
 # --------------------------------------------------------------------------- #
