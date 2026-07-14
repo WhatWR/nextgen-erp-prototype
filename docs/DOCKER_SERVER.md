@@ -22,20 +22,51 @@ cd nextgen-erp
 cp .env.server.example .env.server
 ```
 
-Edit `.env.server` and replace every `CHANGE_ME` value. The ERP domain must be a
-real public hostname so Caddy can obtain its TLS certificate. Then validate,
-build and start the stack:
+Edit `.env.server` and replace every `CHANGE_ME` value. A domain is not required
+for the first deployment. The default `compose.yaml` automatically loads
+`.env.server` and publishes a local-only gateway on `127.0.0.1:8180`:
 
 ```bash
-docker compose --env-file .env.server -f compose.server.yaml config --quiet
-docker compose --env-file .env.server -f compose.server.yaml build
-docker compose --env-file .env.server -f compose.server.yaml up -d
-docker compose --env-file .env.server -f compose.server.yaml logs -f create-site
+docker compose config --quiet
+docker compose build
+docker compose up -d
+docker compose logs -f create-site
 ```
 
+To use a differently named server environment file, set `SERVER_ENV_FILE`, for
+example `SERVER_ENV_FILE=.env.staging docker compose up -d`.
+
 `create-site` exits successfully after it creates or migrates the ERPNext site.
-Open `https://YOUR_ERP_DOMAIN` and sign in as `Administrator` using the password
+Open `http://127.0.0.1:8180` and sign in as `Administrator` using the password
 from `.env.server`.
+
+## Temporary public URL with ngrok
+
+Keep ngrok running on the same server and tunnel the local gateway:
+
+```bash
+ngrok http 8180
+```
+
+Use the generated HTTPS URL for browser access and append `/webhooks/line` for
+the LINE webhook. When ngrok gives you a new URL, update ERPNext's public URL:
+
+```bash
+docker compose exec backend bench --site YOUR_SITE_NAME \
+  set-config host_name https://YOUR-NGROK-HOST.ngrok-free.app
+```
+
+The gateway sends `/webhooks/line` to Order Intake and all other requests to
+ERPNext, so one ngrok tunnel is enough.
+
+## Production domain and HTTPS
+
+After DNS is available, set `ERP_DOMAIN`, `ACME_EMAIL`, and `PUBLIC_URL` in
+`.env.server`, then enable the Caddy production profile:
+
+```bash
+docker compose --profile production up -d
+```
 
 ## Complete the integration
 
@@ -46,15 +77,16 @@ from `.env.server`.
 2. Put those two values in `.env.server`, then apply them:
 
    ```bash
-   docker compose --env-file .env.server -f compose.server.yaml up -d order-intake
+   docker compose up -d order-intake
    ```
 
 3. Open **NextGen Automation Settings** and set:
-   - External Service URL: `https://YOUR_ERP_DOMAIN`
+   - External Service URL: `http://order-intake:8200`
    - External Service API Key: the same `ORDER_INTAKE_API_KEY` from `.env.server`
    - Confidence threshold and invoice-link lifetime
 4. Open **LINE Channel Settings**, enter the LINE channel secret/access token,
-   and use `https://YOUR_ERP_DOMAIN/webhooks/line` as the LINE webhook URL.
+   and use `YOUR_PUBLIC_URL/webhooks/line` as the LINE webhook URL. During the
+   pilot, `YOUR_PUBLIC_URL` is the HTTPS URL displayed by ngrok.
 5. Create the required **LINE Customer Map** records.
 
 Do not enable `ENABLE_LEGACY_PROTOTYPE` on the server.
@@ -62,19 +94,22 @@ Do not enable `ENABLE_LEGACY_PROTOTYPE` on the server.
 ## Normal operations
 
 ```bash
+# Pull the current branch, build, migrate and deploy
+./scripts/deploy.sh
+
 # Status
-docker compose --env-file .env.server -f compose.server.yaml ps
+docker compose ps
 
 # Logs
-docker compose --env-file .env.server -f compose.server.yaml logs -f --tail=200
+docker compose logs -f --tail=200
 
 # Apply code changes and migrate
 git pull
-docker compose --env-file .env.server -f compose.server.yaml build
-docker compose --env-file .env.server -f compose.server.yaml up -d
+docker compose build
+docker compose up -d
 
 # Enter the ERPNext backend
-docker compose --env-file .env.server -f compose.server.yaml exec backend bash
+docker compose exec backend bash
 ```
 
 The one-shot `create-site` service runs again during `up` and performs `bench
@@ -85,7 +120,7 @@ migrate` when the site already exists.
 Create an ERPNext backup before every update and copy it away from the server:
 
 ```bash
-docker compose --env-file .env.server -f compose.server.yaml exec backend \
+docker compose exec backend \
   bench --site YOUR_SITE_NAME backup --with-files --compress
 ```
 

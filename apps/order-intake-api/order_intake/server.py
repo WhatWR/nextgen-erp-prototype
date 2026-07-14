@@ -35,6 +35,11 @@ def build_handler(
     erpclaw_integration: ERPClawIntegrationStore | None = None,
     line_workflow=None,
 ):
+    legacy_enabled = os.environ.get("ENABLE_LEGACY_PROTOTYPE", "").lower() in {
+        "1",
+        "true",
+        "yes",
+    }
     if line_integration is None:
         if os.environ.get("LINE_CONFIG_SOURCE", "erpnext") == "erpnext":
             from .erpnext_line_config import ErpnextLineConfig
@@ -44,16 +49,21 @@ def build_handler(
             line_integration = LineIntegrationStore(
                 service.db.path.parent / "line_integration.json"
             )
-    erpclaw_integration = erpclaw_integration or ERPClawIntegrationStore(
-        service.db.path.parent / "erpclaw_integration.json",
-        Path(__file__).resolve().parents[3] / "vendor" / "erpclaw",
-    )
+    if legacy_enabled and erpclaw_integration is None:
+        module_path = Path(__file__).resolve()
+        default_root = next(
+            (
+                parent / "vendor" / "erpclaw"
+                for parent in module_path.parents
+                if (parent / "vendor" / "erpclaw").exists()
+            ),
+            service.db.path.parent / "erpclaw",
+        )
+        erpclaw_integration = ERPClawIntegrationStore(
+            service.db.path.parent / "erpclaw_integration.json",
+            default_root,
+        )
     line_backend = os.environ.get("LINE_WORKFLOW_BACKEND", "erpnext").lower()
-    legacy_enabled = os.environ.get("ENABLE_LEGACY_PROTOTYPE", "").lower() in {
-        "1",
-        "true",
-        "yes",
-    }
     if line_workflow is None and line_backend == "erpnext":
         from .erpnext_line import ERPNextLineWorkflow
 
