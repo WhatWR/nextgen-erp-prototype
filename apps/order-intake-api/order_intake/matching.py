@@ -111,6 +111,12 @@ def _candidate_score(segment: str, product: ProductCandidate) -> tuple[float, st
     return best_score, best_term
 
 
+def has_quantity_signal(text: str) -> bool:
+    """True when the message contains an explicit quantity+unit (order-shaped)."""
+    normalized = normalize_thai(text)
+    return any(match.group("uom") for match in NUMBER_UNIT_RE.finditer(normalized))
+
+
 def _segments(text: str) -> list[str]:
     normalized = normalize_thai(text)
     boundaries = [0]

@@ -24,7 +24,7 @@ from decimal import Decimal
 
 from .erpnext_adapter import ERPNextCatalogSource
 from .erpnext_client import ERPNextClient
-from .matching import ParsedLine, ProductCandidate, parse_order_lines
+from .matching import ParsedLine, ProductCandidate, has_quantity_signal, parse_order_lines
 
 CREATE_METHOD = "nextgen_erp.api.create_ai_order_intake"
 
@@ -46,6 +46,32 @@ def _candidates(source: ERPNextCatalogSource) -> list[ProductCandidate]:
             )
         )
     return candidates
+
+
+def parse_with_catalog(
+    text: str,
+    *,
+    client: ERPNextClient | None = None,
+    warehouse: str | None = None,
+    price_list: str | None = None,
+) -> list[ParsedLine]:
+    """Run the Thai matcher against the live ERPNext catalog."""
+    client = client or ERPNextClient()
+    source = ERPNextCatalogSource(client, warehouse_id=warehouse, price_list=price_list)
+    return parse_order_lines(text, _candidates(source))
+
+
+def looks_like_question(text: str, parsed: list[ParsedLine]) -> bool:
+    """A message that resolved no product and carries no qty+unit is not an order.
+
+    Order-shaped messages with an unknown item (explicit quantity+unit) keep the
+    existing Needs Review path so staff can rescue real orders.
+    """
+    if not (text or "").strip():
+        return False
+    if not parsed:
+        return True
+    return all(line.product is None for line in parsed) and not has_quantity_signal(text)
 
 
 def build_payload(
@@ -111,9 +137,9 @@ def intake_from_message(
     warehouse: str | None = None,
     price_list: str | None = None,
     confidence_threshold: float | None = None,
+    parsed: list[ParsedLine] | None = None,
 ) -> dict:
     client = client or ERPNextClient()
-    source = ERPNextCatalogSource(client, warehouse_id=warehouse, price_list=price_list)
     if confidence_threshold is None:
         settings = client.call_method("nextgen_erp.api.get_automation_settings")
         threshold = float(
@@ -123,7 +149,8 @@ def intake_from_message(
         )
     else:
         threshold = confidence_threshold
-    parsed = parse_order_lines(text, _candidates(source))
+    if parsed is None:
+        parsed = parse_with_catalog(text, client=client, warehouse=warehouse, price_list=price_list)
     if not parsed:
         raise ValueError("no order lines could be identified")
     payload = build_payload(

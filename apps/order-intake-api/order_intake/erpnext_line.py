@@ -4,14 +4,23 @@ from __future__ import annotations
 
 from typing import Any
 
-from .erpnext_bridge import intake_from_message
+from .erpnext_bridge import intake_from_message, looks_like_question, parse_with_catalog
 from .erpnext_client import ERPNextClient, ERPNextError
 
 
 class ERPNextLineWorkflow:
-    def __init__(self, client: ERPNextClient | None = None, *, warehouse: str | None = None):
+    def __init__(
+        self,
+        client: ERPNextClient | None = None,
+        *,
+        warehouse: str | None = None,
+        assistant=None,
+    ):
         self.client = client or ERPNextClient()
         self.warehouse = warehouse
+        # Optional order_intake.ai.AIAssistant; answers messages the Thai order
+        # parser cannot read. When absent or disabled, behaviour is unchanged.
+        self.assistant = assistant
 
     def handle_event(
         self,
@@ -36,6 +45,16 @@ class ERPNextLineWorkflow:
             "nextgen_erp.api.resolve_line_customer", line_id=line_id
         )
         customer = mapping.get("customer") if isinstance(mapping, dict) else None
+        parsed = None
+        if self.assistant is not None and self.assistant.enabled():
+            parsed = parse_with_catalog(text, client=self.client, warehouse=self.warehouse)
+            if looks_like_question(text, parsed):
+                # No product resolved and no qty+unit signal — a question or
+                # chitchat, not an order. Order-shaped messages (even with an
+                # unknown item) keep the existing Needs Review intake path.
+                return self.assistant.answer(
+                    line_id=line_id, text=text, event_id=event_id, customer=customer
+                )
         result = intake_from_message(
             text,
             customer=customer,
@@ -44,6 +63,7 @@ class ERPNextLineWorkflow:
             source_channel="line",
             client=self.client,
             warehouse=self.warehouse,
+            parsed=parsed,
         )
         erpnext = result.get("erpnext") or {}
         return {

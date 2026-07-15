@@ -13,7 +13,11 @@ them through a confidence-gated order-to-cash workflow.
   the result to ERPNext. Its SQLite prototype workflow is legacy-only.
 - **ERPClaw/OpenClaw** is the conversational action surface. With
   `ERPCLAW_BACKEND=erpnext`, its tools execute through the same secured ERPNext
-  methods instead of ERPClaw SQLite.
+  methods instead of ERPClaw SQLite. (Paused for the current phase.)
+- **LINE AI Assistant** answers customer questions (price/stock, order and
+  payment status, FAQ via RAG) and can re-send the invoice + PromptPay QR —
+  through the same secured ERPNext methods only. See
+  [docs/AI_ASSISTANT.md](docs/AI_ASSISTANT.md).
 
 High-confidence, exception-free intake is sent directly to the customer for
 confirmation. Low-confidence or exceptional intake waits for a human. Customer

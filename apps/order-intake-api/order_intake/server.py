@@ -65,9 +65,16 @@ def build_handler(
         )
     line_backend = os.environ.get("LINE_WORKFLOW_BACKEND", "erpnext").lower()
     if line_workflow is None and line_backend == "erpnext":
+        from .ai import AIAssistant
         from .erpnext_line import ERPNextLineWorkflow
 
-        line_workflow = ERPNextLineWorkflow(warehouse=os.environ.get("ERPNEXT_WAREHOUSE"))
+        warehouse = os.environ.get("ERPNEXT_WAREHOUSE")
+        # Constructed unconditionally; enabled() consults the (cached) NextGen
+        # AI Settings per message, so flipping the Desk switch needs no restart.
+        line_workflow = ERPNextLineWorkflow(
+            warehouse=warehouse,
+            assistant=AIAssistant(warehouse=warehouse),
+        )
     class Handler(BaseHTTPRequestHandler):
         server_version = "NextGenOrderIntake/0.1"
 

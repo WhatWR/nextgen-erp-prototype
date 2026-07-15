@@ -1,0 +1,89 @@
+{
+ "actions": [],
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "gateway_url",
+  "api_key",
+  "column_break_models",
+  "chat_model",
+  "embeddings_model",
+  "section_limits",
+  "max_tool_calls",
+  "daily_message_cap"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "description": "Answer customer questions on LINE with the configured LLM. Orders, confirmations and payment slips are unaffected.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enable LINE AI Assistant"
+  },
+  {
+   "description": "Base URL of an OpenAI-compatible endpoint, e.g. https://api.example.com (the service calls /v1/chat/completions and /v1/embeddings)",
+   "fieldname": "gateway_url",
+   "fieldtype": "Data",
+   "label": "AI Gateway URL"
+  },
+  {
+   "fieldname": "api_key",
+   "fieldtype": "Password",
+   "label": "AI Gateway API Key"
+  },
+  {
+   "fieldname": "column_break_models",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "chat_model",
+   "fieldtype": "Data",
+   "label": "Chat Model"
+  },
+  {
+   "description": "Optional. When empty, knowledge search falls back to keyword matching.",
+   "fieldname": "embeddings_model",
+   "fieldtype": "Data",
+   "label": "Embeddings Model"
+  },
+  {
+   "fieldname": "section_limits",
+   "fieldtype": "Section Break",
+   "label": "Limits"
+  },
+  {
+   "default": "4",
+   "description": "Maximum ERP tool calls the assistant may make while answering one message",
+   "fieldname": "max_tool_calls",
+   "fieldtype": "Int",
+   "label": "Max Tool Calls per Message"
+  },
+  {
+   "default": "200",
+   "description": "Maximum AI answers sent per day across all customers (0 disables the cap)",
+   "fieldname": "daily_message_cap",
+   "fieldtype": "Int",
+   "label": "Daily Answer Cap"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "module": "NextGen ERP",
+ "name": "NextGen AI Settings",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}
