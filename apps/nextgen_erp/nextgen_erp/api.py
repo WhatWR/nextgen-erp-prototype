@@ -882,8 +882,10 @@ def handle_line_payment_slip(
     access_token = line_settings.get_password("channel_access_token", raise_exception=False) or ""
     if not access_token:
         frappe.throw(_("LINE Channel Access Token is required to download payment slips"))
+    from nextgen_erp.line import data_api_base
+
     response = requests.get(
-        f"https://api-data.line.me/v2/bot/message/{quote(message_id, safe='')}/content",
+        f"{data_api_base()}/v2/bot/message/{quote(message_id, safe='')}/content",
         headers={"Authorization": f"Bearer {access_token}"},
         timeout=30,
     )

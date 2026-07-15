@@ -44,6 +44,10 @@ For a Linux server, use the default [compose.yaml](compose.yaml), which loads
 [compose.server.yaml](compose.server.yaml) with `.env.server`, and follow the
 [Docker server deployment guide](docs/DOCKER_SERVER.md).
 
+To rehearse the whole flow locally without real LINE, LLM or slip-verifier
+accounts, run the [sandbox simulator](docs/SANDBOX.md)
+(`python3 scripts/sandbox.py`).
+
 For local development with Dockerized MariaDB and Redis, run
 `./scripts/start-local.sh`. ERPNext remains editable in the local Bench while its
 infrastructure is isolated in `compose.local-infra.yaml`.

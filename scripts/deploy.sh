@@ -28,6 +28,10 @@ cd "$ROOT_DIR"
 if grep -Eq '^[A-Za-z_][A-Za-z0-9_]*=CHANGE_ME' "$ENV_FILE"; then
   fail "$ENV_FILE still contains CHANGE_ME values"
 fi
+# The local sandbox (scripts/sandbox.py, port 8300) must never back production.
+if grep -Ev '^\s*#' "$ENV_FILE" | grep -Eiq 'sandbox|(127\.0\.0\.1|localhost):8300'; then
+  fail "$ENV_FILE points at the local sandbox simulator; use real service URLs for deployment"
+fi
 chmod 600 "$ENV_FILE"
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "$ROOT_DIR is not a Git repository"

@@ -8,7 +8,22 @@ import frappe
 from frappe.integrations.utils import make_post_request
 
 
-LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
+LINE_API_BASE = "https://api.line.me"
+LINE_DATA_API_BASE = "https://api-data.line.me"
+
+
+def api_base() -> str:
+	"""LINE Messaging API host; site config ``nextgen_line_api_base`` overrides it.
+
+	The override exists for the local sandbox simulator only — never set it on
+	a production site.
+	"""
+	return str(frappe.conf.get("nextgen_line_api_base") or LINE_API_BASE).rstrip("/")
+
+
+def data_api_base() -> str:
+	"""LINE content-download host; the same sandbox override redirects it."""
+	return str(frappe.conf.get("nextgen_line_api_base") or LINE_DATA_API_BASE).rstrip("/")
 
 
 def push_text(recipient: str, text: str, image_url: str | None = None) -> dict:
@@ -29,7 +44,7 @@ def push_text(recipient: str, text: str, image_url: str | None = None) -> dict:
 			}
 		)
 	make_post_request(
-		LINE_PUSH_URL,
+		f"{api_base()}/v2/bot/message/push",
 		headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
 		data=json.dumps(
 			{"to": recipient, "messages": messages},
