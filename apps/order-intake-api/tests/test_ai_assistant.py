@@ -225,77 +225,190 @@ class AIAssistantTest(unittest.TestCase):
         self.assertEqual(final_request.get("tool_choice"), "none")
 
 
-class LineRoutingTest(unittest.TestCase):
-    """The workflow only consults the assistant for non-order text."""
+WORKFLOW_CATALOG = {
+    "data": [
+        {
+            "item_code": "DRK-M150",
+            "item_name": "เครื่องดื่ม M-150",
+            "stock_uom": "ลัง",
+            "price": 390,
+            "projected_qty": 20,
+            "aliases": ["M-150", "เอ็ม150", "เอ็มร้อยห้าสิบ"],
+        }
+    ],
+    "has_more": False,
+    "next_start": 1,
+}
 
-    def _workflow_client(self):
-        return FakeClient(
+
+class RecordingAssistant:
+    def __init__(self, enabled=True):
+        self._enabled = enabled
+        self.answered: list[dict] = []
+
+    def enabled(self):
+        return self._enabled
+
+    def answer(self, **kwargs):
+        self.answered.append(kwargs)
+        return {"kind": "ai_answer", "answered": True}
+
+
+class LineRoutingTest(unittest.TestCase):
+    """Routing matrix: question/chitchat → assistant; qty+unit → intake."""
+
+    QUESTIONS = ["สวัสดี", "test", "M-150 ราคาเท่าไหร่", "เครื่องดื่ม M-150 กี่บาท", "M-150 มีของไหม"]
+
+    def _workflow_client(self, extra=None):
+        replies = {
+            "nextgen_erp.api.handle_line_reply": [{"handled": False}] * 8,
+            "nextgen_erp.api.resolve_line_customer": [{"customer": "ร้านเจริญพาณิชย์"}] * 8,
+            "nextgen_erp.api.get_automation_settings": [{"confidence_threshold": 0.95}] * 8,
+            "nextgen_erp.api.get_catalog": [WORKFLOW_CATALOG] * 8,
+        }
+        replies.update(extra or {})
+        return FakeClient(replies)
+
+    def _assert_no_intake(self, client):
+        called = [method for method, _ in client.calls]
+        self.assertNotIn("nextgen_erp.api.create_ai_order_intake", called)
+
+    def test_questions_route_to_the_assistant_and_never_create_an_intake(self):
+        # Covers: greeting, "test", price question and stock question with a
+        # product that WOULD resolve — a product mention alone is not an order.
+        for text in self.QUESTIONS:
+            with self.subTest(text=text):
+                client = self._workflow_client()
+                assistant = RecordingAssistant()
+                workflow = ERPNextLineWorkflow(
+                    client, warehouse="Stores - NG", assistant=assistant
+                )
+                result = workflow.handle_event(line_id="U123", text=text, event_id="evt-q")
+                self.assertEqual(result["kind"], "ai_answer")
+                self.assertEqual(assistant.answered[0]["line_id"], "U123")
+                self.assertEqual(assistant.answered[0]["customer"], "ร้านเจริญพาณิชย์")
+                self._assert_no_intake(client)
+
+    def test_known_product_order_creates_an_intake(self):
+        client = self._workflow_client(
             {
-                "nextgen_erp.api.handle_line_reply": [{"handled": False}],
-                "nextgen_erp.api.resolve_line_customer": [{"customer": "ร้านเจริญพาณิชย์"}],
-                "nextgen_erp.api.get_automation_settings": [{"confidence_threshold": 0.95}],
-                "nextgen_erp.api.get_catalog": [CATALOG_PAGE],
+                "nextgen_erp.api.create_ai_order_intake": [
+                    {"name": "AIO-2", "created": True, "status": "Awaiting Customer"}
+                ]
             }
         )
-
-    def test_question_routes_to_the_assistant_when_enabled(self):
-        recorded = {}
-
-        class StubAssistant:
-            def enabled(self):
-                return True
-
-            def answer(self, **kwargs):
-                recorded.update(kwargs)
-                return {"kind": "ai_answer", "answered": True}
-
-        workflow = ERPNextLineWorkflow(
-            self._workflow_client(), warehouse="Stores - NG", assistant=StubAssistant()
+        assistant = RecordingAssistant()
+        workflow = ERPNextLineWorkflow(client, warehouse="Stores - NG", assistant=assistant)
+        result = workflow.handle_event(
+            line_id="U123", text="เครื่องดื่ม M-150 2 ลัง", event_id="evt-o1"
         )
-        result = workflow.handle_event(line_id="U123", text="มีอะไรขายบ้าง", event_id="evt-q")
-        self.assertEqual(result["kind"], "ai_answer")
-        self.assertEqual(recorded["line_id"], "U123")
-        self.assertEqual(recorded["customer"], "ร้านเจริญพาณิชย์")
-
-    def test_disabled_assistant_preserves_existing_behaviour(self):
-        class DisabledAssistant:
-            def enabled(self):
-                return False
-
-            def answer(self, **kwargs):  # pragma: no cover - must never run
-                raise AssertionError("disabled assistant must not answer")
-
-        client = self._workflow_client()
-        client.replies["nextgen_erp.api.create_ai_order_intake"] = [
-            {"name": "AIO-9", "created": True, "status": "Needs Review"}
-        ]
-        workflow = ERPNextLineWorkflow(
-            client, warehouse="Stores - NG", assistant=DisabledAssistant()
-        )
-        # Today's behaviour: an unmatched message still becomes a review intake.
-        result = workflow.handle_event(line_id="U123", text="มีอะไรขายบ้าง", event_id="evt-q")
-        self.assertEqual(result["kind"], "order_intake")
-        self.assertEqual(result["name"], "AIO-9")
-
-    def test_order_shaped_messages_never_reach_the_assistant(self):
-        class ExplodingAssistant:
-            def enabled(self):
-                return True
-
-            def answer(self, **kwargs):  # pragma: no cover - must never run
-                raise AssertionError("assistant must not answer orders")
-
-        client = self._workflow_client()
-        client.replies["nextgen_erp.api.create_ai_order_intake"] = [
-            {"name": "AIO-2", "created": True, "status": "Awaiting Customer"}
-        ]
-        workflow = ERPNextLineWorkflow(
-            client, warehouse="Stores - NG", assistant=ExplodingAssistant()
-        )
-        # Explicit qty+unit keeps the order path even when the item is unknown.
-        result = workflow.handle_event(line_id="U123", text="M-150 2 ลัง", event_id="evt-o")
         self.assertEqual(result["kind"], "order_intake")
         self.assertEqual(result["name"], "AIO-2")
+        self.assertEqual(assistant.answered, [])
+        create = [c for c in client.calls if c[0] == "nextgen_erp.api.create_ai_order_intake"][0]
+        item = create[1]["payload"]["items"][0]
+        self.assertEqual(item["item_code"], "DRK-M150")
+        self.assertEqual(item["qty"], 2.0)
+
+    def test_alias_only_order_resolves_the_item(self):
+        client = self._workflow_client(
+            {
+                "nextgen_erp.api.create_ai_order_intake": [
+                    {"name": "AIO-3", "created": True, "status": "Awaiting Customer"}
+                ]
+            }
+        )
+        workflow = ERPNextLineWorkflow(
+            client, warehouse="Stores - NG", assistant=RecordingAssistant()
+        )
+        workflow.handle_event(line_id="U123", text="M-150 2 ลัง", event_id="evt-o2")
+        create = [c for c in client.calls if c[0] == "nextgen_erp.api.create_ai_order_intake"][0]
+        self.assertEqual(create[1]["payload"]["items"][0]["item_code"], "DRK-M150")
+
+    def test_unknown_product_order_still_creates_a_review_intake(self):
+        client = self._workflow_client(
+            {
+                "nextgen_erp.api.create_ai_order_intake": [
+                    {"name": "AIO-4", "created": True, "status": "Needs Review"}
+                ]
+            }
+        )
+        workflow = ERPNextLineWorkflow(
+            client, warehouse="Stores - NG", assistant=RecordingAssistant()
+        )
+        result = workflow.handle_event(
+            line_id="U123", text="สินค้าที่ไม่รู้จัก 2 ลัง", event_id="evt-o3"
+        )
+        self.assertEqual(result["kind"], "order_intake")
+        create = [c for c in client.calls if c[0] == "nextgen_erp.api.create_ai_order_intake"][0]
+        payload = create[1]["payload"]
+        self.assertEqual(payload["automation_mode"], "human_review")
+        self.assertIsNone(payload["items"][0]["item_code"])
+        self.assertTrue(payload["items"][0]["raw_text"])  # message text, never None
+
+    def test_disabled_assistant_sends_polite_reply_and_creates_nothing(self):
+        client = self._workflow_client(
+            {"nextgen_erp.ai.send_line_answer": [{"sent": True}] * 2}
+        )
+        workflow = ERPNextLineWorkflow(
+            client, warehouse="Stores - NG", assistant=RecordingAssistant(enabled=False)
+        )
+        result = workflow.handle_event(line_id="U123", text="สวัสดี", event_id="evt-d1")
+        self.assertEqual(result["kind"], "unrecognized")
+        self._assert_no_intake(client)
+        send = [c for c in client.calls if c[0] == "nextgen_erp.ai.send_line_answer"][0]
+        self.assertIn("สั่งซื้อ", send[1]["text"])
+
+    def test_no_assistant_still_never_defaults_a_question_into_an_order(self):
+        client = self._workflow_client(
+            {"nextgen_erp.ai.send_line_answer": [{"sent": True}]}
+        )
+        workflow = ERPNextLineWorkflow(client, warehouse="Stores - NG")
+        result = workflow.handle_event(
+            line_id="U123", text="เครื่องดื่ม M-150 กี่บาท", event_id="evt-d2"
+        )
+        self.assertEqual(result["kind"], "unrecognized")
+        self._assert_no_intake(client)
+
+    def test_gateway_failure_sends_fallback_and_creates_no_intake(self):
+        client = self._workflow_client(
+            {"nextgen_erp.ai.send_line_answer": [{"sent": True}]}
+        )
+        assistant = AIAssistant(
+            client, StaticConfig(), warehouse="Stores - NG", ai_transport=ScriptedAITransport([500])
+        )
+        workflow = ERPNextLineWorkflow(client, warehouse="Stores - NG", assistant=assistant)
+        result = workflow.handle_event(line_id="U123", text="สวัสดี", event_id="evt-f1")
+        self.assertEqual(result["kind"], "ai_fallback")
+        self._assert_no_intake(client)
+        send = [c for c in client.calls if c[0] == "nextgen_erp.ai.send_line_answer"][0]
+        self.assertEqual(send[1]["text"], FALLBACK_MESSAGE)
+
+    def test_confirmation_replies_use_the_guarded_handler_first(self):
+        client = FakeClient(
+            {
+                "nextgen_erp.api.handle_line_reply": [
+                    {"handled": True, "name": "AIO-1", "status": "Awaiting Payment"}
+                ]
+            }
+        )
+        workflow = ERPNextLineWorkflow(
+            client, warehouse="Stores - NG", assistant=RecordingAssistant()
+        )
+        result = workflow.handle_event(line_id="U123", text="ยืนยัน", event_id="evt-c1")
+        self.assertEqual(result["kind"], "customer_reply")
+        self.assertEqual(len(client.calls), 1)  # nothing after the reply handler
+
+    def test_duplicate_webhook_events_forward_the_same_event_id(self):
+        # ERPNext dedupes by LINE Event Receipt; routing must forward the id.
+        client = self._workflow_client()
+        assistant = RecordingAssistant()
+        workflow = ERPNextLineWorkflow(client, warehouse="Stores - NG", assistant=assistant)
+        workflow.handle_event(line_id="U123", text="สวัสดี", event_id="evt-dup")
+        workflow.handle_event(line_id="U123", text="สวัสดี", event_id="evt-dup")
+        self.assertEqual(
+            [a["event_id"] for a in assistant.answered], ["evt-dup", "evt-dup"]
+        )
 
 
 class ErpnextAIConfigTest(unittest.TestCase):

@@ -73,8 +73,14 @@ LINE webhook → order-intake-api (HMAC verify + idempotency, unchanged)
 - A global **Daily Answer Cap** bounds LLM-driven outbound volume (0 disables).
 - Every failure (gateway down, bad model output, ERP rejection) degrades to a
   polite Thai fallback message; the order pipeline is never blocked.
-- With the assistant disabled, LINE behaviour is byte-for-byte the previous
-  behaviour (verified by `tests/test_ai_assistant.py::LineRoutingTest`).
+- Routing is quantity-based, not product-based: a message is an order **only**
+  when it contains an explicit quantity + recognised unit (e.g. "2 ลัง").
+  "M-150 ราคาเท่าไหร่" is a question even though the product resolves — a
+  question can never create an AI Order Intake.
+- With the assistant disabled (or unreachable), questions get a polite
+  "please order as product + quantity + unit" reply and create **nothing**;
+  order-shaped messages behave exactly as before
+  (verified by `tests/test_ai_assistant.py::LineRoutingTest`).
 
 ## Tests
 

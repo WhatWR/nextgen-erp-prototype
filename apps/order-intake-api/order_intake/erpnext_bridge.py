@@ -61,17 +61,17 @@ def parse_with_catalog(
     return parse_order_lines(text, _candidates(source))
 
 
-def looks_like_question(text: str, parsed: list[ParsedLine]) -> bool:
-    """A message that resolved no product and carries no qty+unit is not an order.
+def looks_like_question(text: str) -> bool:
+    """A message without an explicit quantity + recognised unit is not an order.
 
-    Order-shaped messages with an unknown item (explicit quantity+unit) keep the
-    existing Needs Review path so staff can rescue real orders.
+    Mentioning a product name is NOT enough — "M-150 ราคาเท่าไหร่" is a price
+    question even though the product resolves. Only an explicit quantity+unit
+    ("2 ลัง") makes a message order-shaped; order-shaped messages with an
+    unknown item keep the Needs Review path so staff can rescue real orders.
     """
     if not (text or "").strip():
         return False
-    if not parsed:
-        return True
-    return all(line.product is None for line in parsed) and not has_quantity_signal(text)
+    return not has_quantity_signal(text)
 
 
 def build_payload(

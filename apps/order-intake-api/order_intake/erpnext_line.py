@@ -4,8 +4,15 @@ from __future__ import annotations
 
 from typing import Any
 
-from .erpnext_bridge import intake_from_message, looks_like_question, parse_with_catalog
+from .erpnext_bridge import intake_from_message, looks_like_question
 from .erpnext_client import ERPNextClient, ERPNextError
+
+# Sent (best effort) when a conversational message arrives and no assistant is
+# available. It must never become an order instead.
+UNRECOGNIZED_MESSAGE = (
+    "ขออภัยค่ะ ระบบยังไม่เข้าใจข้อความนี้ "
+    "หากต้องการสั่งซื้อ กรุณาพิมพ์ชื่อสินค้าพร้อมจำนวนและหน่วย เช่น น้ำแดง 2 ลัง"
+)
 
 
 class ERPNextLineWorkflow:
@@ -45,16 +52,16 @@ class ERPNextLineWorkflow:
             "nextgen_erp.api.resolve_line_customer", line_id=line_id
         )
         customer = mapping.get("customer") if isinstance(mapping, dict) else None
-        parsed = None
-        if self.assistant is not None and self.assistant.enabled():
-            parsed = parse_with_catalog(text, client=self.client, warehouse=self.warehouse)
-            if looks_like_question(text, parsed):
-                # No product resolved and no qty+unit signal — a question or
-                # chitchat, not an order. Order-shaped messages (even with an
-                # unknown item) keep the existing Needs Review intake path.
+        if looks_like_question(text):
+            # No explicit quantity+unit — a question or chitchat, never an
+            # order (a product name alone must not create an intake). Only
+            # order-shaped messages continue to the intake path below.
+            if self.assistant is not None and self.assistant.enabled():
                 return self.assistant.answer(
                     line_id=line_id, text=text, event_id=event_id, customer=customer
                 )
+            self._push_unrecognized(line_id, event_id)
+            return {"kind": "unrecognized", "handled": False}
         result = intake_from_message(
             text,
             customer=customer,
@@ -63,7 +70,6 @@ class ERPNextLineWorkflow:
             source_channel="line",
             client=self.client,
             warehouse=self.warehouse,
-            parsed=parsed,
         )
         erpnext = result.get("erpnext") or {}
         return {
@@ -73,6 +79,18 @@ class ERPNextLineWorkflow:
             "created": erpnext.get("created"),
             "customer": customer,
         }
+
+    def _push_unrecognized(self, line_id: str, event_id: str) -> None:
+        """Best-effort polite reply when no assistant can answer; never fatal."""
+        try:
+            self.client.call_method(
+                "nextgen_erp.ai.send_line_answer",
+                line_id=line_id,
+                text=UNRECOGNIZED_MESSAGE,
+                event_id=event_id,
+            )
+        except ERPNextError:
+            pass
 
     def handle_attachment(
         self,

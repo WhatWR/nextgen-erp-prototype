@@ -157,8 +157,13 @@ def _selling_rate(item_code: str, customer: str, price_list: str | None = None) 
     return flt(frappe.db.get_value("Item", item_code, "standard_rate"))
 
 
+def _row_label(row) -> str:
+    """Customer-facing item label; unresolved rows fall back to the raw text, never None."""
+    return row.item_name or row.item or (row.raw_text or "").strip() or _("Unidentified item")
+
+
 def _line_message(doc) -> str:
-    item_text = ", ".join(f"{row.item_name or row.item} x {row.qty:g} {row.uom or ''}".strip() for row in doc.items)
+    item_text = ", ".join(f"{_row_label(row)} x {row.qty:g} {row.uom or ''}".strip() for row in doc.items)
     if doc.status == "Needs Review":
         exceptions = _as_list(doc.exception_reasons)
         inventory_not_found = "ไม่พบสินค้าที่ตรงกับข้อความ"

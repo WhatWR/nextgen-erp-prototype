@@ -70,6 +70,26 @@ class IntegrationTestAIOrderIntake(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			doc.save()
 
+	def test_line_message_never_says_none_for_unresolved_items(self):
+		payload = self._payload(f"test-{frappe.generate_hash(length=10)}")
+		payload["items"] = [
+			{
+				"raw_text": "สินค้าที่ไม่รู้จัก 2 ลัง",
+				"item_code": None,
+				"qty": 2,
+				"uom": "ลัง",
+				"rate": 0,
+				"confidence": 0.1,
+				"exception_reason": "ไม่พบสินค้าที่ตรงกับข้อความ",
+			}
+		]
+		payload["exception_reasons"] = ["ไม่พบสินค้าที่ตรงกับข้อความ"]
+		created = api.create_ai_order_intake(payload)
+		doc = frappe.get_doc("AI Order Intake", created["name"])
+		message = api._line_message(doc)
+		self.assertNotIn("None", message)
+		self.assertIn("สินค้าที่ไม่รู้จัก", message)
+
 	def test_atomic_order_to_cash_creates_submitted_erpnext_documents(self):
 		created = api.create_ai_order_intake(
 			self._payload(f"test-{frappe.generate_hash(length=10)}")
