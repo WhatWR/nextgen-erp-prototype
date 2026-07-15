@@ -56,3 +56,10 @@ def after_install() -> None:
 def after_migrate() -> None:
 	_ensure_role()
 	_ensure_custom_fields()
+	# Workspace Sidebar is database-backed rather than exported with the
+	# standard Workspace JSON. Refresh it after migrations so every production
+	# site exposes the complete Order Agent navigation without requiring users
+	# to know the DocType names and find them through global search.
+	from nextgen_erp.setup_doctypes import _desk_tile
+
+	_desk_tile()

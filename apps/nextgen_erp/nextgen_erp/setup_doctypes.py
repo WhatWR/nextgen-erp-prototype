@@ -52,6 +52,11 @@ def _desk_tile():
                 {"type": "Link", "label": "Order Agent", "link_type": "Workspace", "link_to": "Order Agent", "icon": "sell", "idx": 1},
                 {"type": "Link", "label": "AI Order Intake", "link_type": "DocType", "link_to": "AI Order Intake", "idx": 2},
                 {"type": "Link", "label": "LINE Customer Map", "link_type": "DocType", "link_to": "LINE Customer Map", "idx": 3},
+                {"type": "Link", "label": "LINE Channel Settings", "link_type": "DocType", "link_to": "LINE Channel Settings", "idx": 4},
+                {"type": "Link", "label": "Automation Settings", "link_type": "DocType", "link_to": "NextGen Automation Settings", "idx": 5},
+                {"type": "Link", "label": "Payment Settings", "link_type": "DocType", "link_to": "NextGen Payment Settings", "idx": 6},
+                {"type": "Link", "label": "AI Assistant Settings", "link_type": "DocType", "link_to": "NextGen AI Settings", "idx": 7},
+                {"type": "Link", "label": "Knowledge Articles", "link_type": "DocType", "link_to": "NextGen Knowledge Article", "idx": 8},
             ],
         }
     )
