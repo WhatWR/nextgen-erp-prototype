@@ -77,6 +77,7 @@ def run(confirm: str | None = None) -> dict:
 		frappe.throw(_("Only Administrator or System Manager can seed demo data."), frappe.PermissionError)
 
 	created: list[str] = []
+	_ensure_erpnext_prerequisites(created)
 	company = _ensure_company(created)
 	_ensure_company_address(company, created)
 	_ensure_uoms(created)
@@ -99,6 +100,22 @@ def run(confirm: str | None = None) -> dict:
 		"created": created,
 		"message": "Demo data is ready. Existing records were preserved.",
 	}
+
+
+def _ensure_erpnext_prerequisites(created: list[str]) -> None:
+	"""Restore tiny setup fixtures required by ERPNext's Company hook.
+
+	A site restored before the setup wizard completes can have ERPNext installed
+	without the standard ``Transit`` Warehouse Type. Company creation always
+	creates a transit warehouse and then fails link validation. Keeping this
+	bootstrap here makes the explicit demo seed safe on both fresh and fully
+	configured sites without running the entire setup wizard again.
+	"""
+	if not frappe.db.exists("Warehouse Type", "Transit"):
+		doc = frappe.new_doc("Warehouse Type")
+		doc.name = "Transit"
+		doc.insert(ignore_permissions=True)
+		created.append("Warehouse Type:Transit")
 
 
 def _ensure_company(created: list[str]) -> str:
