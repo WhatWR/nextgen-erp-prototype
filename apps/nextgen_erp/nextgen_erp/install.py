@@ -60,6 +60,7 @@ def after_migrate() -> None:
 	# standard Workspace JSON. Refresh it after migrations so every production
 	# site exposes the complete Order Agent navigation without requiring users
 	# to know the DocType names and find them through global search.
-	from nextgen_erp.setup_doctypes import _desk_tile
+	from nextgen_erp.setup_doctypes import _desk_tile, _procurement_workspace
 
+	_procurement_workspace()
 	_desk_tile()

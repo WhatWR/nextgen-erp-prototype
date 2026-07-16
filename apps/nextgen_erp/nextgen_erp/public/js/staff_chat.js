@@ -4,11 +4,15 @@
 	"use strict";
 
 	const METHOD = "nextgen_erp.staff_chat.";
-	const STORAGE_KEY = "nextgen_staff_chat_session";
-	const COPILOT_ICON = "/assets/nextgen_erp/images/ai-sales-copilot.svg";
+	const SESSION_KEY_PREFIX = "nextgen_staff_chat_session:";
+	const ACTIVE_AGENT_KEY = "nextgen_ai_active_agent";
+	const BRAND_ICON = "/assets/nextgen_erp/images/nextgen-icon.svg";
 	const state = {
 		open: false,
-		sessionId: window.localStorage.getItem(STORAGE_KEY),
+		brand: "NextGen AI",
+		agents: [],
+		agentKey: null,
+		sessionId: null,
 		turnId: null,
 		ignoredTurn: null,
 		messages: [],
@@ -36,6 +40,13 @@
 		return frappe.call({ method: METHOD + method, args }).then((response) => response.message);
 	}
 
+	function num(value, digits = 0) {
+		return Number(value || 0).toLocaleString("th-TH", {
+			minimumFractionDigits: digits,
+			maximumFractionDigits: Math.max(digits, 2),
+		});
+	}
+
 	function pageContext() {
 		const route = frappe.get_route?.() || [];
 		const context = { route: route.join("/") };
@@ -57,28 +68,131 @@
 		});
 	}
 
+	// ------------------------------------------------------------------
+	// Agents
+	// ------------------------------------------------------------------
+
+	function agentByKey(key) {
+		return state.agents.find((agent) => agent.key === key) || null;
+	}
+
+	function activeAgent() {
+		return agentByKey(state.agentKey);
+	}
+
+	function matchRouteAgent() {
+		const route = (frappe.get_route?.() || []).join("/").toLowerCase().replace(/\s+/g, "-");
+		if (!route) return null;
+		for (const agent of state.agents) {
+			if ((agent.route_keywords || []).some((keyword) => route.includes(keyword))) {
+				return agent.key;
+			}
+		}
+		return null;
+	}
+
+	function sessionStorageKey(agentKey) {
+		return SESSION_KEY_PREFIX + agentKey;
+	}
+
+	function welcomeMessage(agent) {
+		return {
+			role: "assistant",
+			content: agent.welcome_message,
+			suggestions: (agent.suggested_questions || []).slice(0, 6),
+		};
+	}
+
+	function agentChooserMessage() {
+		return {
+			role: "assistant",
+			content: "ต้องการใช้ผู้ช่วยด้านไหนคะ? เลือกได้จากตัวเลือกด้านล่าง หรือเปลี่ยนภายหลังได้จากเมนูด้านบน",
+			agentChoices: state.agents.map((agent) => agent.key),
+		};
+	}
+
+	function applyAgentTheme(agent) {
+		const panel = document.getElementById("nextgen-chat-panel");
+		if (panel) panel.style.setProperty("--ng-agent-color", agent?.color || "#2563eb");
+		const brandIcon = document.getElementById("nextgen-agent-icon");
+		if (brandIcon && agent) brandIcon.src = agent.icon;
+		const brandTitle = document.getElementById("nextgen-agent-title");
+		if (brandTitle && agent) brandTitle.textContent = agent.title;
+		const brandSub = document.getElementById("nextgen-agent-subtitle");
+		if (brandSub && agent) brandSub.textContent = `${state.brand} · ${agent.subtitle || "Typhoon AI"}`;
+		const menu = document.getElementById("nextgen-agent-menu");
+		if (menu) {
+			menu.querySelectorAll("[data-agent]").forEach((button) => {
+				button.classList.toggle("is-active", button.dataset.agent === state.agentKey);
+			});
+		}
+		const input = document.getElementById("nextgen-chat-input");
+		if (input && agent) {
+			input.placeholder =
+				agent.key === "procurement"
+					? "ถามเรื่องสต๊อก demand ความเสี่ยงของขาด หรือเตรียม PO..."
+					: "ถามข้อมูลสินค้า สต๊อก ราคา หรือสร้างออเดอร์...";
+		}
+	}
+
+	function selectAgent(agentKey, { restore = true } = {}) {
+		const agent = agentByKey(agentKey);
+		if (!agent || state.turnId) return;
+		state.agentKey = agentKey;
+		window.localStorage.setItem(ACTIVE_AGENT_KEY, agentKey);
+		state.sessionId = window.localStorage.getItem(sessionStorageKey(agentKey));
+		state.turnId = null;
+		state.actions.clear();
+		state.messages = [welcomeMessage(agent)];
+		applyAgentTheme(agent);
+		render();
+		if (restore && state.sessionId) restoreSession(state.sessionId, false);
+	}
+
+	// ------------------------------------------------------------------
+	// Mount + panel lifecycle
+	// ------------------------------------------------------------------
+
 	function mount() {
 		if (document.getElementById("nextgen-chat-launcher")) return;
+		const agentMenu = state.agents
+			.map(
+				(agent) => `<button type="button" data-agent="${escapeHtml(agent.key)}">
+					<img src="${escapeHtml(agent.icon)}" alt="">
+					<span><strong>${escapeHtml(agent.title)}</strong><small>${escapeHtml(agent.subtitle || "")}</small></span>
+				</button>`,
+			)
+			.join("");
 		document.body.insertAdjacentHTML(
 			"beforeend",
-			`<button id="nextgen-chat-launcher" type="button" aria-label="เปิด AI Sales Copilot" title="AI Sales Copilot">
-				<img src="${COPILOT_ICON}" alt="" aria-hidden="true">
-				<span class="ng-launcher-label">AI Sales Copilot</span>
+			`<button id="nextgen-chat-launcher" type="button" aria-label="เปิด ${escapeHtml(state.brand)}" title="${escapeHtml(state.brand)}">
+				<img src="${BRAND_ICON}" alt="" aria-hidden="true">
+				<span class="ng-launcher-label">${escapeHtml(state.brand)}</span>
 			</button>
-			<aside id="nextgen-chat-panel" aria-label="NextGen Staff Chat" aria-hidden="true">
+			<aside id="nextgen-chat-panel" aria-label="${escapeHtml(state.brand)}" aria-hidden="true">
 				<header class="ng-chat-header">
-					<div class="ng-chat-brand"><img src="${COPILOT_ICON}" alt=""><div><strong>AI Sales Copilot</strong><small>NextGen ERP · Typhoon AI</small></div></div>
+					<div class="ng-chat-brand">
+						<img id="nextgen-agent-icon" src="${BRAND_ICON}" alt="">
+						<div>
+							<button id="nextgen-agent-switcher" type="button" aria-haspopup="true" aria-expanded="false" title="เปลี่ยนผู้ช่วย">
+								<strong id="nextgen-agent-title">${escapeHtml(state.brand)}</strong>
+								<span class="ng-caret" aria-hidden="true">▾</span>
+							</button>
+							<small id="nextgen-agent-subtitle">${escapeHtml(state.brand)} · Typhoon AI</small>
+						</div>
+					</div>
 					<div class="ng-chat-header-actions">
 						<button data-action="history" title="ประวัติ">☰</button>
 						<button data-action="new" title="แชตใหม่">＋</button>
 						<button data-action="close" title="ปิด">×</button>
 					</div>
 				</header>
+				<div id="nextgen-agent-menu" hidden>${agentMenu}</div>
 				<div id="nextgen-chat-history" hidden></div>
 				<div id="nextgen-chat-messages" role="log" aria-live="polite"></div>
 				<div id="nextgen-chat-status"></div>
 				<footer class="ng-chat-composer">
-					<textarea id="nextgen-chat-input" rows="2" maxlength="4000" placeholder="ถามข้อมูลสินค้า สต๊อก ราคา หรือสร้างออเดอร์..."></textarea>
+					<textarea id="nextgen-chat-input" rows="2" maxlength="4000" placeholder="พิมพ์คำถาม..."></textarea>
 					<div>
 						<button id="nextgen-chat-stop" type="button" hidden>หยุด</button>
 						<button id="nextgen-chat-send" type="button">ส่ง</button>
@@ -93,6 +207,8 @@
 		document.querySelector('[data-action="history"]').addEventListener("click", toggleHistory);
 		document.getElementById("nextgen-chat-send").addEventListener("click", () => send());
 		document.getElementById("nextgen-chat-stop").addEventListener("click", stopStreaming);
+		document.getElementById("nextgen-agent-switcher").addEventListener("click", toggleAgentMenu);
+		document.getElementById("nextgen-agent-menu").addEventListener("click", handleAgentMenuClick);
 		document.getElementById("nextgen-chat-input").addEventListener("keydown", (event) => {
 			if (event.key === "Enter" && !event.shiftKey) {
 				event.preventDefault();
@@ -104,15 +220,16 @@
 		document.getElementById("nextgen-chat-messages").addEventListener("click", handleMessageClick);
 		document.getElementById("nextgen-chat-history").addEventListener("click", handleHistoryClick);
 
-		state.messages = [
-			{
-				role: "assistant",
-				content: "สวัสดีค่ะ ฉันช่วยค้นหาสินค้า ราคา สต๊อก และเตรียม Sales Order ให้ตรวจสอบได้",
-				suggestions: ["สินค้าตัวไหนสต๊อกต่ำ", "ดูออเดอร์ล่าสุด", "สร้าง Sales Order"],
-			},
-		];
-		render();
-		if (state.sessionId) restoreSession(state.sessionId, false);
+		// Pre-select the stored agent so the header is never anonymous.
+		const stored = window.localStorage.getItem(ACTIVE_AGENT_KEY);
+		if (stored && agentByKey(stored)) {
+			selectAgent(stored);
+		} else if (state.agents.length === 1) {
+			selectAgent(state.agents[0].key);
+		} else {
+			state.messages = [agentChooserMessage()];
+			render();
+		}
 	}
 
 	function toggle() {
@@ -121,6 +238,17 @@
 
 	function open() {
 		state.open = true;
+		// Opening from a Sales/Buying route always selects the matching agent.
+		const routeAgent = matchRouteAgent();
+		if (routeAgent && routeAgent !== state.agentKey && !state.turnId) {
+			selectAgent(routeAgent);
+		} else if (!state.agentKey) {
+			if (state.agents.length === 1) selectAgent(state.agents[0].key);
+			else {
+				state.messages = [agentChooserMessage()];
+				render();
+			}
+		}
 		const panel = document.getElementById("nextgen-chat-panel");
 		panel.classList.add("is-open");
 		panel.setAttribute("aria-hidden", "false");
@@ -132,32 +260,52 @@
 		const panel = document.getElementById("nextgen-chat-panel");
 		panel?.classList.remove("is-open");
 		panel?.setAttribute("aria-hidden", "true");
+		const menu = document.getElementById("nextgen-agent-menu");
+		if (menu) menu.hidden = true;
+	}
+
+	function toggleAgentMenu() {
+		const menu = document.getElementById("nextgen-agent-menu");
+		const switcher = document.getElementById("nextgen-agent-switcher");
+		menu.hidden = !menu.hidden;
+		switcher.setAttribute("aria-expanded", String(!menu.hidden));
+	}
+
+	function handleAgentMenuClick(event) {
+		const button = event.target.closest("[data-agent]");
+		if (!button) return;
+		document.getElementById("nextgen-agent-menu").hidden = true;
+		if (button.dataset.agent !== state.agentKey) selectAgent(button.dataset.agent);
 	}
 
 	function newChat() {
+		if (state.turnId) return;
+		const agent = activeAgent();
 		state.sessionId = null;
-		state.turnId = null;
 		state.actions.clear();
-		window.localStorage.removeItem(STORAGE_KEY);
-		state.messages = [
-			{
-				role: "assistant",
-				content: "เริ่มแชตใหม่แล้วค่ะ ต้องการตรวจข้อมูลหรือเตรียมออเดอร์อะไรคะ?",
-				suggestions: ["ค้นหาสินค้า", "ดู Sales Order ล่าสุด", "สรุป pipeline"],
-			},
-		];
+		if (state.agentKey) window.localStorage.removeItem(sessionStorageKey(state.agentKey));
+		state.messages = agent ? [welcomeMessage(agent)] : [agentChooserMessage()];
 		document.getElementById("nextgen-chat-history").hidden = true;
 		render();
 	}
+
+	// ------------------------------------------------------------------
+	// Turns
+	// ------------------------------------------------------------------
 
 	async function send(text) {
 		const input = document.getElementById("nextgen-chat-input");
 		const value = String(text ?? input.value).trim();
 		if (!value || state.turnId) return;
+		if (!state.agentKey) {
+			state.messages.push(agentChooserMessage());
+			render();
+			return;
+		}
 		state.lastInput = value;
 		input.value = "";
 		state.messages.push({ role: "user", content: value });
-		const pending = { role: "assistant", content: "", pending: true, action: null };
+		const pending = { role: "assistant", content: "", pending: true, action: null, forecasts: [] };
 		state.messages.push(pending);
 		state.turnId = makeTurnId();
 		pending.turnId = state.turnId;
@@ -169,10 +317,11 @@
 				message: value,
 				page_context: JSON.stringify(pageContext()),
 				client_turn_id: state.turnId,
+				agent_type: state.agentKey,
 			});
 			state.turnId = result.turn_id;
 			state.sessionId = result.session_id;
-			window.localStorage.setItem(STORAGE_KEY, state.sessionId);
+			window.localStorage.setItem(sessionStorageKey(state.agentKey), state.sessionId);
 			reconcileTurn(result.turn_id, result.session_id);
 		} catch (error) {
 			pending.pending = false;
@@ -200,6 +349,7 @@
 					pending.content = saved.content || pending.content;
 					pending.pending = false;
 					pending.error = saved.message_type === "error";
+					pending.forecasts = saved.forecasts || pending.forecasts || [];
 					if (saved.action) {
 						const action = (data.actions || []).find((row) => row.name === saved.action);
 						if (action) {
@@ -258,6 +408,9 @@
 			pending.action = event.action;
 			state.actions.set(event.action.action_id, event.action);
 			render();
+		} else if (event.type === "forecast") {
+			pending.forecasts = [...(pending.forecasts || []), event.forecast];
+			render();
 		} else if (event.type === "done") {
 			pending.pending = false;
 			state.turnId = null;
@@ -285,12 +438,99 @@
 		if (el) el.textContent = text || "";
 	}
 
-	function actionCard(action) {
-		if (!action?.preview) return "";
+	// ------------------------------------------------------------------
+	// Cards
+	// ------------------------------------------------------------------
+
+	function riskBadge(risk) {
+		const labels = { high: "เสี่ยงสูง", medium: "เสี่ยงปานกลาง", low: "เสี่ยงต่ำ" };
+		return `<span class="ng-risk ng-risk-${escapeHtml(risk || "low")}">${labels[risk] || escapeHtml(risk || "-")}</span>`;
+	}
+
+	function forecastCard(forecast) {
+		if (!forecast) return "";
+		const warnings = (forecast.warnings || [])
+			.map((warning) => `<li>${escapeHtml(warning)}</li>`)
+			.join("");
+		const rows = [
+			["สต๊อกปัจจุบัน", `${num(forecast.actual_qty)} ${escapeHtml(forecast.stock_uom || "")}`],
+			["จองแล้ว", num(forecast.reserved_qty)],
+			["กำลังมา (PO)", num(forecast.incoming_qty)],
+			["Demand 30/60/90 วัน", `${num(forecast.demand_30)} / ${num(forecast.demand_60)} / ${num(forecast.demand_90)}`],
+			["เฉลี่ยต่อวัน", num(forecast.average_daily_demand, 2)],
+			["Lead time", `${num(forecast.lead_time_days)} วัน`],
+			["Days of supply", forecast.days_of_supply == null ? "-" : `${num(forecast.days_of_supply, 1)} วัน`],
+			["Reorder point", num(forecast.reorder_point, 1)],
+			["จำนวนแนะนำ", `<strong>${num(forecast.suggested_qty)} ${escapeHtml(forecast.stock_uom || "")}</strong>`],
+			["คาดว่าจะขาด", forecast.stockout_date ? escapeHtml(forecast.stockout_date) : "-"],
+		]
+			.map(([label, value]) => `<div class="ng-forecast-metric"><small>${label}</small><span>${value}</span></div>`)
+			.join("");
+		return `<section class="ng-forecast-card">
+			<div class="ng-forecast-title">
+				<strong>Forecast: ${escapeHtml(forecast.item_name || forecast.item_code)}</strong>
+				${riskBadge(forecast.stockout_risk)}
+			</div>
+			<div class="ng-forecast-sub">${escapeHtml(forecast.item_code)} · Horizon ${num(forecast.horizon_days)} วัน · Data quality ${Math.round(Number(forecast.data_quality_score || 0) * 100)}%</div>
+			<div class="ng-forecast-grid">${rows}</div>
+			${warnings ? `<ul class="ng-action-warnings">${warnings}</ul>` : ""}
+			<div class="ng-forecast-footer">${escapeHtml(forecast.formula_version || "")}</div>
+		</section>`;
+	}
+
+	function procurementActionCard(action) {
+		const preview = action.preview || {};
+		const isPO = (action.action_type || preview.document_type) !== "prepare_material_request"
+			&& preview.document_type !== "Material Request";
+		const title = isPO ? "Purchase Order Preview" : "Material Request Preview";
+		const items = (preview.items || [])
+			.map((item) => {
+				const variance = Number(item.price_variance_percent || 0);
+				const varianceLabel = variance
+					? `<small class="${variance > 0 ? "ng-var-up" : "ng-var-down"}">${variance > 0 ? "+" : ""}${variance.toFixed(2)}%</small>`
+					: "";
+				const constraint = [
+					Number(item.min_order_qty) ? `MOQ ${num(item.min_order_qty)}` : "",
+					Number(item.order_multiple) ? `x${num(item.order_multiple)}` : "",
+				].filter(Boolean).join(" · ");
+				return `<tr>
+					<td>${escapeHtml(item.item_code)}<small>${escapeHtml(item.item_name || "")}${constraint ? ` · ${constraint}` : ""}</small></td>
+					<td>${num(item.qty)} ${escapeHtml(item.uom || "")}<small>แนะนำ ${num(item.suggested_qty)}</small></td>
+					<td>${num(item.rate, 2)}<small>ล่าสุด ${num(item.last_purchase_rate, 2)} ${varianceLabel}</small></td>
+					<td>${num(item.amount, 2)}</td>
+				</tr>`;
+			})
+			.join("");
+		const warnings = (preview.warnings || []).map((warning) => `<li>${escapeHtml(warning)}</li>`).join("");
+		const status = action.status || "Pending";
+		const result = action.result || {};
+		const resultType = action.result_doctype || result.document_type;
+		const resultName = action.result_name || result.document_name;
+		return `<section class="ng-action-card ng-procurement-card" data-action-id="${escapeHtml(action.action_id)}">
+			<div class="ng-action-title"><strong>${title}</strong><span>Data quality ${Math.round(Number(preview.data_quality_score ?? action.confidence ?? 0) * 100)}%</span></div>
+			<div class="ng-action-customer">
+				${isPO ? `Supplier: <strong>${escapeHtml(preview.supplier_name || preview.supplier || "-")}</strong><br>` : ""}
+				บริษัท: ${escapeHtml(preview.company || "-")} · คลัง: ${escapeHtml(preview.warehouse || "-")}<br>
+				กำหนดรับของ: ${escapeHtml(preview.schedule_date || "-")} · โหมด: ${escapeHtml(preview.automation_mode || "-")}
+			</div>
+			<table><tbody>${items}</tbody></table>
+			<div class="ng-action-total">รวม ${num(preview.total, 2)} THB</div>
+			${warnings ? `<ul class="ng-action-warnings">${warnings}</ul>` : ""}
+			${preview.forecast_explanation ? `<div class="ng-forecast-footer">${escapeHtml(preview.forecast_explanation)}</div>` : ""}
+			<div class="ng-action-buttons" ${status !== "Pending" ? "hidden" : ""}>
+				<button data-confirm-action="${escapeHtml(action.action_id)}">ยืนยันและสร้าง</button>
+				<button class="secondary" data-edit-action="${escapeHtml(action.action_id)}">แก้ไข</button>
+				<button class="secondary" data-cancel-action="${escapeHtml(action.action_id)}">ยกเลิก</button>
+			</div>
+			<div class="ng-action-result">${status !== "Pending" ? escapeHtml(status) : ""}${resultType && resultName ? ` · <button class="ng-doc-link" data-document-type="${escapeHtml(resultType)}" data-document-name="${escapeHtml(resultName)}">${escapeHtml(resultName)}</button>` : ""}</div>
+		</section>`;
+	}
+
+	function salesActionCard(action) {
 		const preview = action.preview;
 		const items = (preview.items || [])
 			.map(
-				(item) => `<tr><td>${escapeHtml(item.item_code)}</td><td>${escapeHtml(item.qty)} ${escapeHtml(item.uom)}</td><td>${Number(item.amount || 0).toLocaleString("th-TH")}</td></tr>`,
+				(item) => `<tr><td>${escapeHtml(item.item_code)}</td><td>${escapeHtml(item.qty)} ${escapeHtml(item.uom)}</td><td>${num(item.amount)}</td></tr>`,
 			)
 			.join("");
 		const warnings = (preview.warnings || []).map((warning) => `<li>${escapeHtml(warning)}</li>`).join("");
@@ -302,7 +542,7 @@
 			<div class="ng-action-title"><strong>Sales Order Preview</strong><span>${Math.round(Number(preview.confidence || 0) * 100)}%</span></div>
 			<div class="ng-action-customer">ลูกค้า: <strong>${escapeHtml(preview.customer_name || preview.customer)}</strong></div>
 			<table><tbody>${items}</tbody></table>
-			<div class="ng-action-total">รวม ${Number(preview.total || 0).toLocaleString("th-TH", { minimumFractionDigits: 2 })} THB</div>
+			<div class="ng-action-total">รวม ${num(preview.total, 2)} THB</div>
 			${warnings ? `<ul class="ng-action-warnings">${warnings}</ul>` : ""}
 			<div class="ng-action-buttons" ${status !== "Pending" ? "hidden" : ""}>
 				<button data-confirm-action="${escapeHtml(action.action_id)}">ยืนยันและดำเนินการ</button>
@@ -310,6 +550,15 @@
 			</div>
 			<div class="ng-action-result">${status !== "Pending" ? escapeHtml(status) : ""}${resultType && resultName ? ` · <button class="ng-doc-link" data-document-type="${escapeHtml(resultType)}" data-document-name="${escapeHtml(resultName)}">${escapeHtml(resultName)}</button>` : ""}</div>
 		</section>`;
+	}
+
+	function actionCard(action) {
+		if (!action?.preview) return "";
+		const type = action.action_type || "prepare_sales_order";
+		if (type === "prepare_purchase_order" || type === "prepare_material_request") {
+			return procurementActionCard(action);
+		}
+		return salesActionCard(action);
 	}
 
 	function render() {
@@ -320,11 +569,23 @@
 				const suggestions = (message.suggestions || [])
 					.map((value) => `<button data-suggestion="${escapeHtml(value)}">${escapeHtml(value)}</button>`)
 					.join("");
+				const agentChoices = (message.agentChoices || [])
+					.map((key) => {
+						const agent = agentByKey(key);
+						if (!agent) return "";
+						return `<button class="ng-agent-choice" data-choose-agent="${escapeHtml(key)}">
+							<img src="${escapeHtml(agent.icon)}" alt=""> ${escapeHtml(agent.title)}
+						</button>`;
+					})
+					.join("");
+				const forecasts = (message.forecasts || []).map(forecastCard).join("");
 				const documentLink = message.href ? ` <button class="ng-doc-link" data-document-type="${escapeHtml(message.documentType)}" data-document-name="${escapeHtml(message.documentName)}">เปิดเอกสาร</button>` : "";
 				return `<div class="ng-message ng-${message.role} ${message.error ? "ng-error" : ""}" data-index="${index}">
 					<div class="ng-bubble">${message.pending && !message.content ? '<span class="ng-thinking">กำลังคิด</span>' : renderText(message.content)}${documentLink}</div>
+					${forecasts}
 					${message.action ? actionCard(message.action) : ""}
 					${suggestions ? `<div class="ng-suggestions">${suggestions}</div>` : ""}
+					${agentChoices ? `<div class="ng-suggestions ng-agent-choices">${agentChoices}</div>` : ""}
 					${message.error ? '<button data-retry="1" class="ng-retry">ลองอีกครั้ง</button>' : ""}
 				</div>`;
 			})
@@ -333,15 +594,28 @@
 	}
 
 	async function handleMessageClick(event) {
+		const choose = event.target.closest("[data-choose-agent]");
+		if (choose) return selectAgent(choose.dataset.chooseAgent);
 		const suggestion = event.target.closest("[data-suggestion]");
 		if (suggestion) return send(suggestion.dataset.suggestion);
 		if (event.target.closest("[data-retry]")) return send(state.lastInput);
 		const confirm = event.target.closest("[data-confirm-action]");
 		if (confirm) return confirmAction(confirm.dataset.confirmAction);
+		const edit = event.target.closest("[data-edit-action]");
+		if (edit) return editAction(edit.dataset.editAction);
 		const cancel = event.target.closest("[data-cancel-action]");
 		if (cancel) return cancelAction(cancel.dataset.cancelAction);
 		const link = event.target.closest("[data-document-type]");
 		if (link) frappe.set_route("Form", link.dataset.documentType, link.dataset.documentName);
+	}
+
+	function editAction(actionId) {
+		const action = state.actions.get(actionId);
+		if (!action || action.status !== "Pending") return;
+		const input = document.getElementById("nextgen-chat-input");
+		input.value = "แก้ไข preview ล่าสุด: ";
+		input.focus();
+		setStatus("พิมพ์สิ่งที่ต้องการแก้ เช่น จำนวน supplier หรือวันรับของ แล้วส่งเพื่อให้สร้าง preview ใหม่");
 	}
 
 	async function confirmAction(actionId) {
@@ -353,7 +627,11 @@
 			const result = await call("confirm_action", { action_id: actionId });
 			action.status = "Completed";
 			action.result = result;
-			const label = result.high_confidence ? "สร้างและจองสต๊อกสำเร็จ" : "ส่งเข้าคิวตรวจสอบแล้ว";
+			action.result_doctype = result.document_type;
+			action.result_name = result.document_name;
+			const serverMessage = result.result?.message;
+			const label = serverMessage
+				|| (result.high_confidence ? "สร้างและจองสต๊อกสำเร็จ" : "ส่งเข้าคิวตรวจสอบแล้ว");
 			state.messages.push({
 				role: "assistant",
 				content: `${label}: ${result.document_name}`,
@@ -380,6 +658,10 @@
 		}
 	}
 
+	// ------------------------------------------------------------------
+	// History + session restore
+	// ------------------------------------------------------------------
+
 	async function toggleHistory() {
 		const panel = document.getElementById("nextgen-chat-history");
 		panel.hidden = !panel.hidden;
@@ -387,9 +669,12 @@
 			panel.innerHTML = '<div class="ng-history-loading">กำลังโหลด...</div>';
 			try {
 				const sessions = await call("list_sessions");
-				panel.innerHTML = sessions.length
-					? sessions.map((session) => `<button data-session="${escapeHtml(session.name)}"><strong>${escapeHtml(session.title)}</strong><small>${escapeHtml(session.last_activity_at)}</small></button>`).join("")
-					: '<div class="ng-history-loading">ยังไม่มีประวัติ</div>';
+				const relevant = sessions.filter(
+					(session) => !state.agentKey || (session.agent_type || "sales") === state.agentKey,
+				);
+				panel.innerHTML = relevant.length
+					? relevant.map((session) => `<button data-session="${escapeHtml(session.name)}"><strong>${escapeHtml(session.title)}</strong><small>${escapeHtml(session.last_activity_at)}</small></button>`).join("")
+					: '<div class="ng-history-loading">ยังไม่มีประวัติของผู้ช่วยนี้</div>';
 			} catch (error) {
 				panel.innerHTML = `<div class="ng-history-loading">${escapeHtml(error?.message || "โหลดไม่สำเร็จ")}</div>`;
 			}
@@ -404,8 +689,15 @@
 	async function restoreSession(sessionId, notify = true) {
 		try {
 			const data = await call("get_session", { session_id: sessionId });
+			const sessionAgent = data.session?.agent_type || "sales";
+			if (sessionAgent !== state.agentKey && agentByKey(sessionAgent)) {
+				// A session is pinned to its agent; follow it instead of mixing.
+				state.agentKey = sessionAgent;
+				window.localStorage.setItem(ACTIVE_AGENT_KEY, sessionAgent);
+				applyAgentTheme(activeAgent());
+			}
 			state.sessionId = sessionId;
-			window.localStorage.setItem(STORAGE_KEY, sessionId);
+			window.localStorage.setItem(sessionStorageKey(state.agentKey), sessionId);
 			state.actions.clear();
 			for (const action of data.actions || []) {
 				state.actions.set(action.name, { ...action, action_id: action.name });
@@ -413,25 +705,34 @@
 			state.messages = (data.messages || []).map((message) => ({
 				role: message.role,
 				content: message.content,
+				forecasts: message.forecasts || [],
 				action: message.action ? state.actions.get(message.action) : null,
 			}));
 			document.getElementById("nextgen-chat-history").hidden = true;
 			render();
 			if (notify) frappe.show_alert({ message: "เปิดประวัติแชตแล้ว", indicator: "blue" });
 		} catch {
-			if (state.sessionId === sessionId) window.localStorage.removeItem(STORAGE_KEY);
+			if (state.sessionId === sessionId) {
+				window.localStorage.removeItem(sessionStorageKey(state.agentKey));
+			}
 		}
 	}
+
+	// ------------------------------------------------------------------
+	// Bootstrap
+	// ------------------------------------------------------------------
 
 	async function bootstrap() {
 		if (frappe.session.user === "Guest") return;
 		try {
 			const status = await call("get_status");
-			if (!status?.enabled) return;
+			if (!status?.enabled || !(status.agents || []).length) return;
+			state.brand = status.brand || "NextGen AI";
+			state.agents = status.agents;
 			mount();
 			frappe.realtime.on("nextgen_staff_chat", onRealtime);
 		} catch (error) {
-			console.warn("AI Sales Copilot is unavailable", error);
+			console.warn("NextGen AI assistant is unavailable", error);
 			// Unauthorized roles and disabled/unavailable chat get no launcher.
 		}
 	}

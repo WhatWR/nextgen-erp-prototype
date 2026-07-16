@@ -1,0 +1,16 @@
+{
+ "doctype": "Page",
+ "module": "NextGen ERP",
+ "name": "ai-cockpit",
+ "page_name": "ai-cockpit",
+ "standard": "Yes",
+ "title": "AI Cockpit",
+ "roles": [
+  {"role": "System Manager"},
+  {"role": "Sales Manager"},
+  {"role": "Sales User"},
+  {"role": "Purchase Manager"},
+  {"role": "Purchase User"},
+  {"role": "Stock Manager"}
+ ]
+}

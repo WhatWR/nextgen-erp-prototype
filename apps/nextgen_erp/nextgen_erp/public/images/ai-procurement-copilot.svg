@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="AI Procurement Copilot">
+  <defs>
+    <linearGradient id="procurement-gradient" x1="7" y1="5" x2="57" y2="59" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0e9f6e"/>
+      <stop offset="1" stop-color="#0694a2"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="url(#procurement-gradient)"/>
+  <path d="M17 17h30a7 7 0 0 1 7 7v14a7 7 0 0 1-7 7H32l-11 8v-8h-4a7 7 0 0 1-7-7V24a7 7 0 0 1 7-7Z" fill="#fff"/>
+  <path d="M22 24h3.2l1 3h15.4l-2 8.4a2.4 2.4 0 0 1-2.3 1.8h-8.2a2.4 2.4 0 0 1-2.3-1.8L24.6 26H22Z" fill="#0e9f6e"/>
+  <circle cx="29.5" cy="40.5" r="1.9" fill="#0e9f6e"/>
+  <circle cx="37.5" cy="40.5" r="1.9" fill="#0e9f6e"/>
+  <path d="m44 20 1.6 4 4 1.6-4 1.6-1.6 4-1.6-4-4-1.6 4-1.6Z" fill="#f97316"/>
+  <circle cx="47" cy="18" r="6" fill="#22c55e" stroke="#fff" stroke-width="3"/>
+</svg>

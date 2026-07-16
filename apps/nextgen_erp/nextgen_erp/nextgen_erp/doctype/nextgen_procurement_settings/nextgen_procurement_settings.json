@@ -1,0 +1,213 @@
+{
+ "actions": [],
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enable_procurement_copilot",
+  "procurement_model",
+  "column_break_general",
+  "automation_mode",
+  "allow_direct_po_submission",
+  "section_forecast",
+  "default_forecast_horizon_days",
+  "history_window_days",
+  "safety_stock_days",
+  "column_break_forecast",
+  "minimum_data_days",
+  "default_supplier_lead_time_days",
+  "section_schedule",
+  "enable_scheduled_forecast",
+  "forecast_schedule",
+  "column_break_schedule",
+  "allowed_item_groups",
+  "allowed_warehouses",
+  "section_guardrails",
+  "maximum_po_value",
+  "maximum_price_variance_percent",
+  "minimum_data_quality_score",
+  "column_break_guardrails",
+  "daily_auto_spend_limit",
+  "auto_item_allowlist",
+  "approved_suppliers"
+ ],
+ "fields": [
+  {
+   "default": "0",
+   "description": "Enable the AI Procurement Copilot agent in the NextGen AI assistant.",
+   "fieldname": "enable_procurement_copilot",
+   "fieldtype": "Check",
+   "label": "Enable Procurement Copilot"
+  },
+  {
+   "description": "Typhoon model for the procurement agent. Falls back to Staff Chat Model when blank.",
+   "fieldname": "procurement_model",
+   "fieldtype": "Data",
+   "label": "Procurement Model"
+  },
+  {
+   "fieldname": "column_break_general",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Shadow",
+   "description": "Shadow: recommendations only, never creates buying documents. Approval Required: confirmed previews create Draft documents. Automatic: gated auto-creation of submitted Material Requests.",
+   "fieldname": "automation_mode",
+   "fieldtype": "Select",
+   "label": "Automation Mode",
+   "options": "Shadow\nApproval Required\nAutomatic"
+  },
+  {
+   "default": "0",
+   "description": "Separate, stricter flag. Even in Automatic mode, direct Purchase Order submission stays disabled unless this is on.",
+   "fieldname": "allow_direct_po_submission",
+   "fieldtype": "Check",
+   "label": "Allow Direct PO Submission (Automatic Mode)"
+  },
+  {
+   "fieldname": "section_forecast",
+   "fieldtype": "Section Break",
+   "label": "Forecast Formula (nextgen-procurement-v1)"
+  },
+  {
+   "default": "30",
+   "fieldname": "default_forecast_horizon_days",
+   "fieldtype": "Int",
+   "label": "Default Forecast Horizon (Days)"
+  },
+  {
+   "default": "90",
+   "fieldname": "history_window_days",
+   "fieldtype": "Int",
+   "label": "History Window (Days)"
+  },
+  {
+   "default": "7",
+   "description": "Safety stock = max(Item.safety_stock, average daily demand × this)",
+   "fieldname": "safety_stock_days",
+   "fieldtype": "Int",
+   "label": "Safety Stock (Days of Demand)"
+  },
+  {
+   "fieldname": "column_break_forecast",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "14",
+   "description": "History shorter than this lowers the data-quality score and adds a warning.",
+   "fieldname": "minimum_data_days",
+   "fieldtype": "Int",
+   "label": "Minimum Data (Days)"
+  },
+  {
+   "default": "7",
+   "description": "Used when the item has no lead time configured.",
+   "fieldname": "default_supplier_lead_time_days",
+   "fieldtype": "Int",
+   "label": "Default Supplier Lead Time (Days)"
+  },
+  {
+   "fieldname": "section_schedule",
+   "fieldtype": "Section Break",
+   "label": "Scheduled Forecast"
+  },
+  {
+   "default": "0",
+   "fieldname": "enable_scheduled_forecast",
+   "fieldtype": "Check",
+   "label": "Enable Scheduled Forecast"
+  },
+  {
+   "default": "Daily",
+   "fieldname": "forecast_schedule",
+   "fieldtype": "Select",
+   "label": "Forecast Schedule",
+   "options": "Daily"
+  },
+  {
+   "fieldname": "column_break_schedule",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "One Item Group per line. Empty analyzes all purchase items.",
+   "fieldname": "allowed_item_groups",
+   "fieldtype": "Small Text",
+   "label": "Allowed Item Groups"
+  },
+  {
+   "description": "One Warehouse per line. Empty uses the default buying warehouse.",
+   "fieldname": "allowed_warehouses",
+   "fieldtype": "Small Text",
+   "label": "Allowed Warehouses"
+  },
+  {
+   "fieldname": "section_guardrails",
+   "fieldtype": "Section Break",
+   "label": "Guardrails"
+  },
+  {
+   "default": "50000",
+   "fieldname": "maximum_po_value",
+   "fieldtype": "Currency",
+   "label": "Maximum PO Value"
+  },
+  {
+   "default": "10",
+   "fieldname": "maximum_price_variance_percent",
+   "fieldtype": "Float",
+   "label": "Maximum Price Variance (%)"
+  },
+  {
+   "default": "0.8",
+   "fieldname": "minimum_data_quality_score",
+   "fieldtype": "Float",
+   "label": "Minimum Data Quality Score"
+  },
+  {
+   "fieldname": "column_break_guardrails",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "0",
+   "description": "Automatic mode stops creating documents once today's auto-created total reaches this (0 disables the limit).",
+   "fieldname": "daily_auto_spend_limit",
+   "fieldtype": "Currency",
+   "label": "Daily Auto Spend Limit"
+  },
+  {
+   "description": "One Item code per line. Automatic mode only ever touches these items.",
+   "fieldname": "auto_item_allowlist",
+   "fieldtype": "Small Text",
+   "label": "Automatic Mode Item Allowlist"
+  },
+  {
+   "description": "One Supplier per line. Empty means any linked supplier is acceptable for Automatic mode.",
+   "fieldname": "approved_suppliers",
+   "fieldtype": "Small Text",
+   "label": "Approved Suppliers"
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "module": "NextGen ERP",
+ "name": "NextGen Procurement Settings",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "read": 1,
+   "role": "Purchase Manager",
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": []
+}

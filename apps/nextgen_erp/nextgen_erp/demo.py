@@ -2,6 +2,7 @@
 
     bench --site nextgen.localhost execute nextgen_erp.demo.run
     bench --site nextgen.localhost execute nextgen_erp.demo.smoke
+    bench --site nextgen.localhost execute nextgen_erp.demo.procurement
 """
 
 from __future__ import annotations
@@ -9,8 +10,10 @@ from __future__ import annotations
 import json
 
 import frappe
+from frappe.utils import add_days, nowdate
 
 CUSTOMER = "ร้านเจริญพาณิชย์"
+SUPPLIER = "บจก.โอสถสภา"
 ITEMS = [
     {"item_code": "DRK-M150", "item_name": "เครื่องดื่ม M-150", "uom": "ลัง", "rate": 390, "aliases": ["M-150", "เอ็มร้อยห้าสิบ", "เอ็ม150"]},
     {"item_code": "NDL-MAMA-TOM", "item_name": "มาม่าต้มยำน้ำข้น", "uom": "แพ็ก", "rate": 72, "aliases": ["มาม่าต้มยำ", "มาม่า"]},
@@ -113,6 +116,140 @@ def _stock():
         )
         entry.insert()
         entry.submit()
+
+
+def procurement():
+    """Deterministic procurement fixture: supplier terms, 90 days of demand
+    history (closed so it reserves nothing), purchase-price lots and one open
+    PO. Idempotent — safe to run repeatedly."""
+    run()
+    _supplier()
+    _supplier_terms()
+    _demand_history()
+    _purchase_history()
+    frappe.db.commit()
+    return "ok"
+
+
+def _supplier():
+    if not frappe.db.exists("Supplier", SUPPLIER):
+        frappe.get_doc(
+            {
+                "doctype": "Supplier",
+                "supplier_name": SUPPLIER,
+                "supplier_type": "Company",
+                "supplier_group": frappe.db.get_value("Supplier Group", {"is_group": 0}, "name")
+                or "All Supplier Groups",
+            }
+        ).insert()
+
+
+def _supplier_terms():
+    buying_price_list = (
+        frappe.db.get_single_value("Buying Settings", "buying_price_list")
+        or frappe.db.get_value("Price List", {"buying": 1, "enabled": 1}, "name")
+        or "Standard Buying"
+    )
+    for it, lead, moq, buy_rate in (
+        (ITEMS[0], 5, 5, 350.0),
+        (ITEMS[1], 7, 10, 62.0),
+        (ITEMS[2], 7, 5, 380.0),
+    ):
+        item = frappe.get_doc("Item", it["item_code"])
+        item.lead_time_days = lead
+        item.safety_stock = 10
+        item.min_order_qty = moq
+        item.is_purchase_item = 1
+        if not any(row.supplier == SUPPLIER for row in item.supplier_items or []):
+            item.append("supplier_items", {"supplier": SUPPLIER})
+        item.save(ignore_permissions=True)
+        if not frappe.db.exists(
+            "Item Price",
+            {"item_code": it["item_code"], "price_list": buying_price_list, "buying": 1},
+        ):
+            frappe.get_doc(
+                {
+                    "doctype": "Item Price",
+                    "item_code": it["item_code"],
+                    "price_list": buying_price_list,
+                    "buying": 1,
+                    "price_list_rate": buy_rate,
+                }
+            ).insert(ignore_permissions=True)
+
+
+def _demand_history():
+    """Weekly M-150 wholesale orders over the last ~12 weeks. Submitted then
+    closed, so history exists without reserving live stock."""
+    company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
+        "Global Defaults", "default_company"
+    )
+    for days_ago in range(3, 85, 7):
+        date = add_days(nowdate(), -days_ago)
+        if frappe.db.exists(
+            "Sales Order", {"customer": CUSTOMER, "transaction_date": date, "docstatus": 1}
+        ):
+            continue
+        so = frappe.get_doc(
+            {
+                "doctype": "Sales Order",
+                "customer": CUSTOMER,
+                "company": company,
+                "transaction_date": date,
+                "delivery_date": add_days(date, 2),
+                "items": [
+                    {"item_code": "DRK-M150", "qty": 70, "uom": "ลัง"},
+                    {"item_code": "NDL-MAMA-TOM", "qty": 25, "uom": "แพ็ก"},
+                ],
+            }
+        )
+        so.insert(ignore_permissions=True)
+        so.submit()
+        so.update_status("Closed")
+
+
+def _purchase_history():
+    """Two closed purchase lots with different rates plus one open PO."""
+    company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
+        "Global Defaults", "default_company"
+    )
+    warehouse = frappe.db.get_value(
+        "Warehouse", {"company": company, "is_group": 0}, "name", order_by="creation asc"
+    )
+    lots = (
+        (add_days(nowdate(), -60), 335.0, 50, "Closed"),
+        (add_days(nowdate(), -12), 350.0, 50, "Closed"),
+        (add_days(nowdate(), -2), 352.0, 20, None),  # open, awaiting receipt
+    )
+    for date, rate, qty, close in lots:
+        if frappe.db.exists(
+            "Purchase Order",
+            {"supplier": SUPPLIER, "transaction_date": date, "docstatus": 1},
+        ):
+            continue
+        po = frappe.get_doc(
+            {
+                "doctype": "Purchase Order",
+                "supplier": SUPPLIER,
+                "company": company,
+                "transaction_date": date,
+                "schedule_date": add_days(date, 5),
+                "items": [
+                    {
+                        "item_code": "DRK-M150",
+                        "qty": qty,
+                        "rate": rate,
+                        "uom": "ลัง",
+                        "warehouse": warehouse,
+                        "schedule_date": add_days(date, 5),
+                    }
+                ],
+            }
+        )
+        po.insert(ignore_permissions=True)
+        po.submit()
+        if close:
+            po.update_status(close)
 
 
 def smoke():

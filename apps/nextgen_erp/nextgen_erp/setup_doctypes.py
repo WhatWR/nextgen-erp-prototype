@@ -15,9 +15,13 @@ import frappe
 
 MODULE = "NextGen ERP"
 DESK_GROUP = "Next Gen ERP"
+AI_COCKPIT = "AI Cockpit"
 COPILOT_WORKSPACE = "AI Sales Copilot"
+PROCUREMENT_WORKSPACE = "AI Procurement Copilot"
 ORDER_INTAKE_SIDEBAR = "Order Intake Agent"
 COPILOT_ICON = "/assets/nextgen_erp/images/ai-sales-copilot.svg"
+PROCUREMENT_ICON = "/assets/nextgen_erp/images/ai-procurement-copilot.svg"
+COCKPIT_ICON = "/assets/nextgen_erp/images/ai-cockpit.svg"
 ERP_ICON = "/assets/nextgen_erp/images/nextgen-erp-icon.svg"
 
 
@@ -33,10 +37,57 @@ def run():
     _line_settings()
     card_map = _number_cards()
     _workspace(card_map)
+    _procurement_workspace()
     _branding()
     _desk_tile()
     frappe.db.commit()
     return "ok"
+
+
+def _procurement_workspace():
+    """Create/refresh the AI Procurement Copilot workspace (idempotent)."""
+    if frappe.db.exists("Workspace", PROCUREMENT_WORKSPACE):
+        frappe.delete_doc("Workspace", PROCUREMENT_WORKSPACE, ignore_permissions=True, force=True)
+    content = [
+        {"id": "logo", "type": "paragraph", "data": {"text": '<img src="/assets/nextgen_erp/images/nextgen-logo.svg" alt="NextGen Order AI" style="height:44px">', "col": 12}},
+        {"id": "hdr", "type": "header", "data": {"text": '<span class="h4">AI Procurement Copilot</span>', "col": 12}},
+        {"id": "sc1", "type": "shortcut", "data": {"shortcut_name": "Procurement Recommendations", "col": 3}},
+        {"id": "sc2", "type": "shortcut", "data": {"shortcut_name": "Forecast Snapshots", "col": 3}},
+        {"id": "sc3", "type": "shortcut", "data": {"shortcut_name": "Purchase Orders", "col": 3}},
+        {"id": "sc4", "type": "shortcut", "data": {"shortcut_name": "Procurement Automation Settings", "col": 3}},
+    ]
+    frappe.get_doc(
+        {
+            "doctype": "Workspace",
+            "name": PROCUREMENT_WORKSPACE,
+            "title": PROCUREMENT_WORKSPACE,
+            "label": PROCUREMENT_WORKSPACE,
+            "module": MODULE,
+            "public": 1,
+            "icon": "cart",
+            "content": json.dumps(content),
+            "shortcuts": [
+                {"label": "Procurement Recommendations", "link_to": "NextGen Procurement Recommendation", "type": "DocType", "color": "Orange"},
+                {"label": "Forecast Snapshots", "link_to": "NextGen Procurement Forecast", "type": "DocType", "color": "Green"},
+                {"label": "Purchase Orders", "link_to": "Purchase Order", "type": "DocType", "color": "Blue"},
+                {"label": "Procurement Automation Settings", "link_to": "NextGen Procurement Settings", "type": "DocType", "color": "Grey"},
+            ],
+            "links": [
+                {"label": "Procurement Dashboard", "type": "Card Break"},
+                {"label": "Procurement Recommendations", "link_to": "NextGen Procurement Recommendation", "link_type": "DocType", "type": "Link"},
+                {"label": "Forecast Snapshots", "link_to": "NextGen Procurement Forecast", "link_type": "DocType", "type": "Link"},
+                {"label": "Buying Documents", "type": "Card Break"},
+                {"label": "Material Requests", "link_to": "Material Request", "link_type": "DocType", "type": "Link"},
+                {"label": "Purchase Orders", "link_to": "Purchase Order", "link_type": "DocType", "type": "Link"},
+                {"label": "Suppliers", "link_to": "Supplier", "link_type": "DocType", "type": "Link"},
+                {"label": "Supplier Quotations", "link_to": "Supplier Quotation", "link_type": "DocType", "type": "Link"},
+                {"label": "Settings", "type": "Card Break"},
+                {"label": "Buying Settings", "link_to": "Buying Settings", "link_type": "DocType", "type": "Link"},
+                {"label": "Procurement Automation Settings", "link_to": "NextGen Procurement Settings", "link_type": "DocType", "type": "Link"},
+                {"label": "AI Assistant Settings", "link_to": "NextGen AI Settings", "link_type": "DocType", "type": "Link"},
+            ],
+        }
+    ).insert(ignore_permissions=True)
 
 
 def _desk_tile():
@@ -45,9 +96,23 @@ def _desk_tile():
         if frappe.db.exists("Workspace", legacy):
             frappe.delete_doc("Workspace", legacy, force=True, ignore_permissions=True)
 
-    for legacy in ("Order Agent", ORDER_INTAKE_SIDEBAR, COPILOT_WORKSPACE):
+    for legacy in ("Order Agent", ORDER_INTAKE_SIDEBAR, "AI Command Center", AI_COCKPIT, COPILOT_WORKSPACE, PROCUREMENT_WORKSPACE):
         if frappe.db.exists("Workspace Sidebar", legacy):
             frappe.delete_doc("Workspace Sidebar", legacy, force=True, ignore_permissions=True)
+
+    cockpit_sidebar = frappe.get_doc(
+        {
+            "doctype": "Workspace Sidebar",
+            "title": AI_COCKPIT,
+            "module": MODULE,
+            "header_icon": "chart",
+            "items": [
+                {"type": "Link", "label": AI_COCKPIT, "link_type": "Page", "link_to": "ai-cockpit", "icon": "chart", "idx": 1},
+            ],
+        }
+    )
+    cockpit_sidebar.flags.ignore_links = True
+    cockpit_sidebar.insert(ignore_permissions=True)
 
     copilot_sidebar = frappe.get_doc(
         {
@@ -57,18 +122,41 @@ def _desk_tile():
             "header_icon": "bot-message-square",
             "items": [
                 {"type": "Link", "label": COPILOT_WORKSPACE, "link_type": "Workspace", "link_to": COPILOT_WORKSPACE, "icon": "bot-message-square", "idx": 1},
-                {"type": "Link", "label": "AI Order Intake", "link_type": "DocType", "link_to": "AI Order Intake", "idx": 2},
-                {"type": "Link", "label": "LINE Customer Map", "link_type": "DocType", "link_to": "LINE Customer Map", "idx": 3},
-                {"type": "Link", "label": "LINE Channel Settings", "link_type": "DocType", "link_to": "LINE Channel Settings", "idx": 4},
-                {"type": "Link", "label": "Automation Settings", "link_type": "DocType", "link_to": "NextGen Automation Settings", "idx": 5},
-                {"type": "Link", "label": "Payment Settings", "link_type": "DocType", "link_to": "NextGen Payment Settings", "idx": 6},
-                {"type": "Link", "label": "AI Assistant Settings", "link_type": "DocType", "link_to": "NextGen AI Settings", "idx": 7},
-                {"type": "Link", "label": "Knowledge Articles", "link_type": "DocType", "link_to": "NextGen Knowledge Article", "idx": 8},
+                {"type": "Link", "label": "AI Order Intake", "link_type": "DocType", "link_to": "AI Order Intake", "icon": "notepad-text", "idx": 2},
+                {"type": "Link", "label": "LINE Customer Map", "link_type": "DocType", "link_to": "LINE Customer Map", "icon": "users-round", "idx": 3},
+                {"type": "Link", "label": "LINE Channel Settings", "link_type": "DocType", "link_to": "LINE Channel Settings", "icon": "message-square-reply", "idx": 4},
+                {"type": "Link", "label": "Automation Settings", "link_type": "DocType", "link_to": "NextGen Automation Settings", "icon": "repeat-2", "idx": 5},
+                {"type": "Link", "label": "Payment Settings", "link_type": "DocType", "link_to": "NextGen Payment Settings", "icon": "circle-dollar-sign", "idx": 6},
+                {"type": "Link", "label": "AI Assistant Settings", "link_type": "DocType", "link_to": "NextGen AI Settings", "icon": "user-cog", "idx": 7},
+                {"type": "Link", "label": "Knowledge Articles", "link_type": "DocType", "link_to": "NextGen Knowledge Article", "icon": "book-open-text", "idx": 8},
             ],
         }
     )
     copilot_sidebar.flags.ignore_links = True
     copilot_sidebar.insert(ignore_permissions=True)
+
+    procurement_sidebar = frappe.get_doc(
+        {
+            "doctype": "Workspace Sidebar",
+            "title": PROCUREMENT_WORKSPACE,
+            "module": MODULE,
+            "header_icon": "buying",
+            "items": [
+                {"type": "Link", "label": PROCUREMENT_WORKSPACE, "link_type": "Workspace", "link_to": PROCUREMENT_WORKSPACE, "icon": "buying", "idx": 1},
+                {"type": "Link", "label": "Procurement Recommendations", "link_type": "DocType", "link_to": "NextGen Procurement Recommendation", "icon": "lightbulb", "idx": 2},
+                {"type": "Link", "label": "Forecast Snapshots", "link_type": "DocType", "link_to": "NextGen Procurement Forecast", "icon": "chart", "idx": 3},
+                {"type": "Link", "label": "Material Requests", "link_type": "DocType", "link_to": "Material Request", "icon": "notepad-text", "idx": 4},
+                {"type": "Link", "label": "Purchase Orders", "link_type": "DocType", "link_to": "Purchase Order", "icon": "receipt-text", "idx": 5},
+                {"type": "Link", "label": "Suppliers", "link_type": "DocType", "link_to": "Supplier", "icon": "users-round", "idx": 6},
+                {"type": "Link", "label": "Supplier Quotations", "link_type": "DocType", "link_to": "Supplier Quotation", "icon": "book-open-text", "idx": 7},
+                {"type": "Link", "label": "Buying Settings", "link_type": "DocType", "link_to": "Buying Settings", "icon": "buying", "idx": 8},
+                {"type": "Link", "label": "Procurement Automation Settings", "link_type": "DocType", "link_to": "NextGen Procurement Settings", "icon": "repeat-2", "idx": 9},
+                {"type": "Link", "label": "AI Assistant Settings", "link_type": "DocType", "link_to": "NextGen AI Settings", "icon": "user-cog", "idx": 10},
+            ],
+        }
+    )
+    procurement_sidebar.flags.ignore_links = True
+    procurement_sidebar.insert(ignore_permissions=True)
 
     # Drop the old group name so the launcher has one unambiguous entry.
     if frappe.db.exists("Desktop Icon", COPILOT_WORKSPACE):
@@ -90,7 +178,7 @@ def _desk_tile():
             "logo_url": None,
             "standard": 1,
             "hidden": 0,
-            "idx": 0,
+            "idx": 1,
         }
     )
     group.save(ignore_permissions=True)
@@ -104,29 +192,55 @@ def _desk_tile():
         app_icon.hidden = 1
         app_icon.save(ignore_permissions=True)
 
-    for legacy in ("Order Agent", ORDER_INTAKE_SIDEBAR, COPILOT_WORKSPACE):
+    for legacy in ("Order Agent", ORDER_INTAKE_SIDEBAR, "AI Command Center", AI_COCKPIT, COPILOT_WORKSPACE, PROCUREMENT_WORKSPACE):
         existing = frappe.db.get_value("Desktop Icon", {"label": legacy})
         if existing:
             frappe.delete_doc("Desktop Icon", existing, force=True, ignore_permissions=True)
 
-    icon = frappe.get_doc(
+    cockpit_icon = frappe.get_doc(
         {
             "doctype": "Desktop Icon",
-            "label": COPILOT_WORKSPACE,
+            "label": AI_COCKPIT,
             "icon_type": "Link",
             "link_type": "Workspace Sidebar",
-            "link_to": COPILOT_WORKSPACE,
+            "link_to": AI_COCKPIT,
             "app": "nextgen_erp",
             "parent_icon": DESK_GROUP,
-            "icon": "bot-message-square",
-            "logo_url": COPILOT_ICON,
+            "icon": "chart",
+            "logo_url": COCKPIT_ICON,
             "standard": 1,
             "hidden": 0,
             "idx": 1,
         }
     )
-    icon.flags.ignore_links = True
-    icon.insert(ignore_permissions=True)
+    cockpit_icon.flags.ignore_links = True
+    cockpit_icon.insert(ignore_permissions=True)
+
+    for idx, (label, sidebar, logo, lucide) in enumerate(
+        (
+            (COPILOT_WORKSPACE, COPILOT_WORKSPACE, COPILOT_ICON, "bot-message-square"),
+            (PROCUREMENT_WORKSPACE, PROCUREMENT_WORKSPACE, PROCUREMENT_ICON, "shopping-cart"),
+        ),
+        start=2,
+    ):
+        icon = frappe.get_doc(
+            {
+                "doctype": "Desktop Icon",
+                "label": label,
+                "icon_type": "Link",
+                "link_type": "Workspace Sidebar",
+                "link_to": sidebar,
+                "app": "nextgen_erp",
+                "parent_icon": DESK_GROUP,
+                "icon": lucide,
+                "logo_url": logo,
+                "standard": 1,
+                "hidden": 0,
+                "idx": idx,
+            }
+        )
+        icon.flags.ignore_links = True
+        icon.insert(ignore_permissions=True)
 
     from frappe.desk.doctype.desktop_icon.desktop_icon import clear_desktop_icons_cache
 

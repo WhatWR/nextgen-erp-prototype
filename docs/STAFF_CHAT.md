@@ -4,6 +4,13 @@ NextGen Staff Chat is an authenticated assistant embedded in every ERPNext Desk
 page. It reads live ERPNext data through an explicit tool allowlist and can
 prepare a Sales Order preview. The model never writes ERP documents directly.
 
+Since the multi-agent update the panel is branded **NextGen AI** and hosts two
+agents behind one launcher: the **AI Sales Copilot** described here and the
+**AI Procurement Copilot** (see `docs/PROCUREMENT_COPILOT.md`). Agents are
+registered in `nextgen_erp/agents.py`; every session, message and action is
+pinned to an `agent_type`, the server resolves and validates the agent on every
+turn, and each agent only ever sees its own tool allowlist.
+
 ## Configure
 
 Open **NextGen AI Settings** as System Manager and set:

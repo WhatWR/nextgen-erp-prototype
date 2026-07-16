@@ -1,4 +1,11 @@
-"""Authenticated ERPNext staff assistant powered by Typhoon tool calling."""
+"""Authenticated ERPNext staff assistant (NextGen AI) powered by Typhoon tool calling.
+
+This module is both the shared multi-agent chat engine (sessions, turns,
+actions, realtime events) and the tool module of the ``sales`` agent. The
+``procurement`` agent lives in :mod:`nextgen_erp.procurement`; the registry
+that binds agents, roles, tool allowlists and routes is
+:mod:`nextgen_erp.agents`.
+"""
 
 from __future__ import annotations
 
@@ -13,6 +20,7 @@ import frappe
 from frappe import _
 from frappe.utils import add_to_date, cint, flt, get_datetime, now_datetime, nowdate
 
+from nextgen_erp import agents
 from nextgen_erp.typhoon import TyphoonClient, TyphoonError
 
 ALLOWED_ROLES = {"System Manager", "Sales Manager", "Sales User"}
@@ -167,7 +175,7 @@ TOOLS: list[dict[str, Any]] = [
 TOOL_NAMES = {tool["function"]["name"] for tool in TOOLS}
 
 
-def _extract_tool_calls(response: dict) -> list[dict]:
+def _extract_tool_calls(response: dict, tool_names: set[str] | None = None) -> list[dict]:
 	"""Accept native tool_calls and Typhoon's occasional JSON-in-content fallback."""
 	tool_calls = response.get("tool_calls") or []
 	if tool_calls:
@@ -179,7 +187,7 @@ def _extract_tool_calls(response: dict) -> list[dict]:
 		candidate = json.loads(content)
 	except (TypeError, json.JSONDecodeError):
 		return []
-	if not isinstance(candidate, dict) or candidate.get("name") not in TOOL_NAMES:
+	if not isinstance(candidate, dict) or candidate.get("name") not in (tool_names or TOOL_NAMES):
 		return []
 	arguments = candidate.get("arguments")
 	if not isinstance(arguments, dict):
@@ -197,12 +205,43 @@ def _extract_tool_calls(response: dict) -> list[dict]:
 
 
 def _require_staff() -> str:
+	"""Any user with access to at least one registered agent may use the panel."""
 	user = frappe.session.user
 	if not user or user == "Guest":
 		frappe.throw(_("Authentication required"), frappe.AuthenticationError)
-	if user != "Administrator" and not ALLOWED_ROLES.intersection(frappe.get_roles(user)):
+	if user != "Administrator" and not agents.allowed_agents(user):
 		frappe.throw(_("You are not permitted to use NextGen Staff Chat"), frappe.PermissionError)
 	return user
+
+
+def _agent_enabled(agent: agents.Agent) -> bool:
+	"""Per-agent enable switch on top of the master Staff Chat switch."""
+	check = getattr(agent._module(), "is_enabled", None)
+	return bool(check()) if callable(check) else True
+
+
+def _resolve_agent(
+	user: str, session=None, requested: str | None = None, route: str | None = None
+) -> agents.Agent:
+	"""Server-side agent resolution. The LLM never chooses; a session's agent
+	is pinned at creation and can never be switched silently afterwards."""
+	requested = (requested or "").strip() or None
+	if session is not None:
+		pinned = session.get("agent_type") or agents.DEFAULT_AGENT
+		if requested and requested != pinned:
+			frappe.throw(
+				_("This chat session belongs to the {0} agent. Start a new chat to switch agents.").format(
+					pinned
+				)
+			)
+		agent = agents.get_agent(pinned)
+	else:
+		key = requested or agents.resolve_route_agent(route) or agents.DEFAULT_AGENT
+		agent = agents.get_agent(key)
+	agents.require_agent_access(agent.key, user)
+	if not _agent_enabled(agent):
+		frappe.throw(_("The {0} agent is disabled in its settings.").format(agent.title))
+	return agent
 
 
 def _settings() -> dict[str, Any]:
@@ -218,11 +257,27 @@ def _settings() -> dict[str, Any]:
 	}
 
 
+def is_enabled() -> bool:
+	"""Sales agent enable switch (same as the master Staff Chat switch)."""
+	return _settings()["enabled"]
+
+
 @frappe.whitelist()
 def get_status():
 	"""Safe bootstrap status; never exposes the gateway, model or API key."""
-	_require_staff()
-	return {"enabled": _settings()["enabled"]}
+	user = _require_staff()
+	enabled = _settings()["enabled"]
+	available = [
+		agent.public_config()
+		for agent in agents.allowed_agents(user)
+		if _agent_enabled(agent)
+	]
+	return {
+		"enabled": enabled and bool(available),
+		"brand": "NextGen AI",
+		"default_agent": available[0]["key"] if available else agents.DEFAULT_AGENT,
+		"agents": available,
+	}
 
 
 def _parse_json(value, fallback):
@@ -252,11 +307,13 @@ def _save_message(
 	action: str | None = None,
 	page_context: dict | None = None,
 	tool_summary: Any = None,
+	agent_type: str = agents.DEFAULT_AGENT,
 ):
 	message = frappe.get_doc(
 		{
 			"doctype": "NextGen Chat Message",
 			"session": session,
+			"agent_type": agent_type,
 			"user": user,
 			"role": role,
 			"content": content or " ",
@@ -288,6 +345,7 @@ def start_turn(
 	message: str | None = None,
 	page_context=None,
 	client_turn_id: str | None = None,
+	agent_type: str | None = None,
 ):
 	user = _require_staff()
 	config = _settings()
@@ -312,11 +370,14 @@ def start_turn(
 	context = {key: context.get(key) for key in ("route", "doctype", "name") if context.get(key)}
 	if session_id:
 		session = _session(session_id, user)
+		agent = _resolve_agent(user, session=session, requested=agent_type)
 	else:
+		agent = _resolve_agent(user, requested=agent_type, route=context.get("route"))
 		session = frappe.get_doc(
 			{
 				"doctype": "NextGen Chat Session",
 				"user": user,
+				"agent_type": agent.key,
 				"title": text[:80],
 				"status": "Open",
 				"last_activity_at": now_datetime(),
@@ -326,7 +387,9 @@ def start_turn(
 		turn_id = str(uuid.UUID(client_turn_id)) if client_turn_id else str(uuid.uuid4())
 	except (ValueError, TypeError, AttributeError):
 		frappe.throw(_("Invalid client turn ID"))
-	_save_message(session.name, user, "user", text, turn_id=turn_id, page_context=context)
+	_save_message(
+		session.name, user, "user", text, turn_id=turn_id, page_context=context, agent_type=agent.key
+	)
 	frappe.enqueue(
 		"nextgen_erp.staff_chat.run_turn",
 		queue="short",
@@ -337,7 +400,7 @@ def start_turn(
 		turn_id=turn_id,
 		page_context=context,
 	)
-	return {"turn_id": turn_id, "session_id": session.name}
+	return {"turn_id": turn_id, "session_id": session.name, "agent_type": agent.key}
 
 
 @frappe.whitelist()
@@ -346,7 +409,7 @@ def list_sessions():
 	return frappe.get_all(
 		"NextGen Chat Session",
 		filters={"user": user},
-		fields=["name", "title", "status", "last_activity_at"],
+		fields=["name", "title", "status", "agent_type", "last_activity_at"],
 		order_by="last_activity_at desc",
 		limit=50,
 	)
@@ -359,14 +422,30 @@ def get_session(session_id: str):
 	messages = frappe.get_all(
 		"NextGen Chat Message",
 		filters={"session": session.name},
-		fields=["name", "role", "content", "message_type", "turn_id", "action", "creation"],
+		fields=["name", "role", "content", "message_type", "turn_id", "action", "tool_summary", "creation"],
 		order_by="creation asc",
 		limit=200,
 	)
+	for message in messages:
+		summary = _parse_json(message.get("tool_summary"), {})
+		# Only the forecast payloads matter to the client; keep the rest server-side.
+		message["forecasts"] = summary.get("forecasts") or []
+		message.pop("tool_summary", None)
 	actions = frappe.get_all(
 		"NextGen Chat Action",
 		filters={"session": session.name},
-		fields=["name", "status", "confidence", "preview", "warnings", "expires_at", "result_doctype", "result_name"],
+		fields=[
+			"name",
+			"status",
+			"action_type",
+			"agent_type",
+			"confidence",
+			"preview",
+			"warnings",
+			"expires_at",
+			"result_doctype",
+			"result_name",
+		],
 		order_by="creation asc",
 	)
 	for action in actions:
@@ -405,10 +484,16 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 	frappe.set_user(user)
 	try:
 		_require_staff()
-		_session(session_id, user)
+		session = _session(session_id, user)
+		agent = _resolve_agent(user, session=session)
 		config = _settings()
 		if not config["enabled"]:
 			raise TyphoonError("Staff Chat was disabled before this turn ran")
+		model = config["model"]
+		if agent.key == "procurement":
+			from nextgen_erp import forecast
+
+			model = forecast.get_settings()["model"] or model
 		client = TyphoonClient(config["gateway_url"], config["api_key"])
 		history = frappe.get_all(
 			"NextGen Chat Message",
@@ -420,15 +505,18 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 		history.reverse()
 		context_note = json.dumps(page_context or {}, ensure_ascii=False)
 		messages: list[dict[str, Any]] = [
-			{"role": "system", "content": f"{SYSTEM_PROMPT}\nบริบทหน้า ERP ปัจจุบัน: {context_note}"}
+			{"role": "system", "content": f"{agent.system_prompt}\nบริบทหน้า ERP ปัจจุบัน: {context_note}"}
 		]
 		messages.extend({"role": row.role, "content": row.content} for row in history)
+		agent_tools = agent.tools
+		agent_tool_names = agent.tool_names
 		action_ids: list[str] = []
 		tool_log: list[str] = []
+		forecasts: list[dict] = []
 		final_text = ""
 		for _ in range(config["max_tool_calls"]):
-			response = client.chat(model=config["model"], messages=messages, tools=TOOLS)
-			tool_calls = _extract_tool_calls(response)
+			response = client.chat(model=model, messages=messages, tools=agent_tools)
+			tool_calls = _extract_tool_calls(response, agent_tool_names)
 			if not tool_calls:
 				# After tool use, make a separate tools-disabled streaming request so
 				# Desk receives real deltas instead of one large completion.
@@ -446,7 +534,8 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 					arguments = json.loads(function.get("arguments") or "{}")
 				except (TypeError, json.JSONDecodeError):
 					arguments = {}
-				result = _dispatch_tool(name, arguments, user=user, session_id=session_id)
+				# The agent registry enforces the per-agent tool allowlist.
+				result = agent.dispatch(name, arguments, user=user, session_id=session_id)
 				tool_log.append(name)
 				if result.get("action_id"):
 					action_ids.append(result["action_id"])
@@ -456,6 +545,10 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 						"action",
 						action=result,
 					)
+				if result.get("forecast_card"):
+					card = {key: value for key, value in result.items() if key != "forecast_card"}
+					forecasts.append(card)
+					_publish(user, turn_id, "forecast", forecast=card)
 				_publish(user, turn_id, "tool", name=name)
 				messages.append(
 					{
@@ -472,12 +565,12 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 				)
 		if action_ids:
 			# Never let the model claim that a preview is an executed document or
-			# invent an SO number. The action card is the authoritative summary.
-			final_text = ACTION_PREVIEW_TEXT
+			# invent a document number. The action card is the authoritative summary.
+			final_text = agent.action_preview_text or ACTION_PREVIEW_TEXT
 			_publish(user, turn_id, "delta", text=final_text)
 		elif not final_text and tool_log:
 			chunks = []
-			for chunk in client.stream_chat(model=config["model"], messages=messages):
+			for chunk in client.stream_chat(model=model, messages=messages):
 				chunks.append(chunk)
 				_publish(user, turn_id, "delta", text=chunk)
 			final_text = "".join(chunks).strip()
@@ -494,8 +587,10 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 			turn_id=turn_id,
 			action=action_ids[-1] if action_ids else None,
 			message_type="action" if action_ids else "text",
+			agent_type=agent.key,
 			tool_summary={
 				"tools": tool_log,
+				"forecasts": forecasts,
 				"latency_ms": round((time.monotonic() - started_at) * 1000),
 				"usage": client.usage,
 			},
@@ -679,6 +774,10 @@ def _dispatch_tool(name: str, arguments: dict, *, user: str, session_id: str):
 	return {"error": f"Unknown or forbidden tool: {name}"}
 
 
+# Uniform dispatch entry point used by the agent registry.
+dispatch_tool = _dispatch_tool
+
+
 def _best_match(rows: list[dict]) -> tuple[dict | None, bool]:
 	if not rows:
 		return None, False
@@ -781,6 +880,7 @@ def _prepare_sales_order(arguments: dict, *, user: str, session_id: str):
 			"doctype": "NextGen Chat Action",
 			"session": session_id,
 			"user": user,
+			"agent_type": "sales",
 			"action_type": "prepare_sales_order",
 			"status": "Pending",
 			"confidence": confidence,
@@ -862,6 +962,47 @@ def _create_review_intake(action, preview: dict, warnings: list[str]):
 	return doc.name
 
 
+def _execute_sales_action(action) -> tuple[str, str, dict, bool]:
+	"""Original preview-confirm flow for prepare_sales_order actions."""
+	preview = _parse_json(action.preview, {})
+	live_preview, live_warnings = _revalidate(preview)
+	original_warnings = _parse_json(action.warnings, [])
+	threshold = flt(
+		frappe.db.get_single_value("NextGen Automation Settings", "confidence_threshold") or 0.95
+	)
+	high_confidence = bool(
+		flt(action.confidence) >= threshold
+		and not original_warnings
+		and not live_warnings
+		and live_preview.get("customer")
+		and live_preview.get("items")
+	)
+	if high_confidence:
+		from nextgen_erp.api import create_sales_order
+
+		result = create_sales_order(
+			external_reference=action.idempotency_key,
+			customer=live_preview["customer"],
+			company=live_preview["company"],
+			currency=live_preview.get("currency") or "THB",
+			delivery_date=live_preview.get("delivery_date") or nowdate(),
+			items=[
+				{
+					"item_code": row["item_code"],
+					"qty": row["qty"],
+					"uom": row["uom"],
+					"warehouse": row.get("warehouse"),
+				}
+				for row in live_preview["items"]
+			],
+			reserve_stock=1,
+		)
+		return "Sales Order", result["sales_order"], result, True
+	warnings = list(dict.fromkeys([*original_warnings, *live_warnings]))
+	name = _create_review_intake(action, live_preview, warnings)
+	return "AI Order Intake", name, {"name": name, "status": "Needs Review", "warnings": warnings}, False
+
+
 @frappe.whitelist()
 def confirm_action(action_id: str):
 	user = _require_staff()
@@ -869,6 +1010,11 @@ def confirm_action(action_id: str):
 	action = frappe.get_doc("NextGen Chat Action", action_id)
 	if action.user != user:
 		frappe.throw(_("Chat action not found"), frappe.DoesNotExistError)
+	# The action stays pinned to its agent; confirming requires that agent's roles.
+	action_agent = agents.get_agent(action.agent_type or agents.agent_for_action_type(action.action_type).key)
+	if action.action_type not in action_agent.action_types:
+		frappe.throw(_("Chat action type does not belong to its agent"))
+	agents.require_agent_access(action_agent.key, user)
 	if action.status == "Completed":
 		return {
 			"action_id": action.name,
@@ -886,47 +1032,15 @@ def confirm_action(action_id: str):
 	action.status = "Executing"
 	action.confirmed_at = now_datetime()
 	action.save(ignore_permissions=True)
-	preview = _parse_json(action.preview, {})
-	live_preview, live_warnings = _revalidate(preview)
-	original_warnings = _parse_json(action.warnings, [])
-	threshold = flt(
-		frappe.db.get_single_value("NextGen Automation Settings", "confidence_threshold") or 0.95
-	)
-	high_confidence = bool(
-		flt(action.confidence) >= threshold
-		and not original_warnings
-		and not live_warnings
-		and live_preview.get("customer")
-		and live_preview.get("items")
-	)
 	try:
-		if high_confidence:
-			from nextgen_erp.api import create_sales_order
-
-			result = create_sales_order(
-				external_reference=action.idempotency_key,
-				customer=live_preview["customer"],
-				company=live_preview["company"],
-				currency=live_preview.get("currency") or "THB",
-				delivery_date=live_preview.get("delivery_date") or nowdate(),
-				items=[
-					{
-						"item_code": row["item_code"],
-						"qty": row["qty"],
-						"uom": row["uom"],
-						"warehouse": row.get("warehouse"),
-					}
-					for row in live_preview["items"]
-				],
-				reserve_stock=1,
-			)
-			doctype = "Sales Order"
-			name = result["sales_order"]
+		if action.action_type == "prepare_sales_order":
+			doctype, name, result, high_confidence = _execute_sales_action(action)
 		else:
-			warnings = list(dict.fromkeys([*original_warnings, *live_warnings]))
-			name = _create_review_intake(action, live_preview, warnings)
-			doctype = "AI Order Intake"
-			result = {"name": name, "status": "Needs Review", "warnings": warnings}
+			from nextgen_erp import procurement
+
+			result = procurement.execute_action(action)
+			doctype, name = result["document_type"], result["document_name"]
+			high_confidence = False
 		action.status = "Completed"
 		action.result_doctype = doctype
 		action.result_name = name

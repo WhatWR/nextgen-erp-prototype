@@ -55,6 +55,42 @@
 .ng-chat-brand img { width: 36px; height: 36px; border-radius: 11px; }
 
 .ng-chat-header small { display: block; color: var(--text-muted, #64748b); font-size: 11px; }
+
+#nextgen-agent-switcher {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	padding: 0;
+	border: 0;
+	background: transparent;
+	color: inherit;
+	font-size: inherit;
+	cursor: pointer;
+}
+#nextgen-agent-switcher strong { border-bottom: 2px solid var(--ng-agent-color, #2563eb); }
+#nextgen-agent-switcher .ng-caret { color: var(--text-muted, #64748b); font-size: 11px; }
+
+#nextgen-agent-menu {
+	border-bottom: 1px solid var(--border-color, #e5e7eb);
+	background: var(--fg-color, #fff);
+}
+#nextgen-agent-menu > button {
+	display: flex;
+	width: 100%;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 16px;
+	border: 0;
+	border-bottom: 1px solid var(--border-color, #eef2f7);
+	background: transparent;
+	color: inherit;
+	text-align: left;
+	cursor: pointer;
+}
+#nextgen-agent-menu > button:hover { background: var(--subtle-fg, #f8fafc); }
+#nextgen-agent-menu > button.is-active { background: var(--subtle-fg, #f1f5f9); }
+#nextgen-agent-menu img { width: 30px; height: 30px; border-radius: 9px; }
+#nextgen-agent-menu small { display: block; color: var(--text-muted, #64748b); font-size: 11px; }
 .ng-chat-header-actions { display: flex; gap: 4px; }
 .ng-chat-header button { border: 0; background: transparent; color: inherit; font-size: 20px; cursor: pointer; }
 
@@ -89,6 +125,48 @@
 .ng-action-buttons button { flex: 1; border: 0; border-radius: 8px; padding: 8px; background: #2563eb; color: #fff; cursor: pointer; }
 .ng-action-buttons button.secondary { border: 1px solid var(--border-color, #d1d5db); background: transparent; color: var(--text-color, #334155); }
 .ng-action-result { margin-top: 6px; color: #15803d; font-size: 12px; }
+
+.ng-action-card td small { display: block; color: var(--text-muted, #64748b); font-size: 11px; }
+.ng-procurement-card { border-color: #a7f3d0; }
+.ng-procurement-card .ng-action-title { color: #065f46; }
+.ng-procurement-card .ng-action-title span { background: #ecfdf5; }
+.ng-procurement-card .ng-action-buttons button { background: var(--ng-agent-color, #0e9f6e); }
+.ng-procurement-card .ng-action-buttons button.secondary { background: transparent; color: var(--text-color, #334155); }
+.ng-var-up { color: #b91c1c; }
+.ng-var-down { color: #15803d; }
+
+.ng-forecast-card {
+	width: 94%;
+	margin-top: 8px;
+	padding: 12px;
+	border: 1px solid #a7f3d0;
+	border-radius: 12px;
+	background: var(--fg-color, #fff);
+}
+.ng-forecast-title { display: flex; align-items: center; justify-content: space-between; color: #065f46; }
+.ng-forecast-sub { margin: 4px 0 8px; color: var(--text-muted, #64748b); font-size: 11px; }
+.ng-forecast-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 6px 12px; }
+.ng-forecast-metric small { display: block; color: var(--text-muted, #64748b); font-size: 11px; }
+.ng-forecast-metric span { font-size: 13px; }
+.ng-forecast-footer { margin-top: 8px; color: var(--text-muted, #94a3b8); font-size: 10px; }
+.ng-risk { padding: 2px 8px; border-radius: 999px; font-size: 11px; }
+.ng-risk-high { background: #fee2e2; color: #b91c1c; }
+.ng-risk-medium { background: #fef3c7; color: #b45309; }
+.ng-risk-low { background: #dcfce7; color: #15803d; }
+
+.ng-agent-choices .ng-agent-choice {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	border: 1px solid var(--border-color, #d1d5db);
+	border-radius: 10px;
+	padding: 7px 10px;
+	background: var(--fg-color, #fff);
+	color: var(--text-color, #172033);
+	font-size: 12px;
+	cursor: pointer;
+}
+.ng-agent-choice img { width: 20px; height: 20px; border-radius: 6px; }
 
 #nextgen-chat-status { min-height: 24px; padding: 4px 16px; color: var(--text-muted, #64748b); font-size: 11px; }
 .ng-chat-composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border-color, #e5e7eb); }

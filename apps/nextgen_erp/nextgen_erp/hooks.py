@@ -175,7 +175,11 @@ app_include_js = "/assets/nextgen_erp/js/staff_chat.js"
 # 	],
 # }
 scheduler_events = {
-	"daily": ["nextgen_erp.staff_chat.cleanup_expired_chat_data"],
+	"daily": [
+		"nextgen_erp.staff_chat.cleanup_expired_chat_data",
+		# Respects enable_procurement_copilot + enable_scheduled_forecast flags.
+		"nextgen_erp.procurement.run_scheduled_forecast",
+	],
 }
 
 # Testing
