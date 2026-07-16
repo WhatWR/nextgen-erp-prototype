@@ -7,6 +7,7 @@ from nextgen_erp import forecast
 SETTINGS = {
 	"enabled": True,
 	"model": "",
+	"default_buying_warehouse": "",
 	"horizon_days": 30,
 	"history_window_days": 90,
 	"safety_stock_days": 7,

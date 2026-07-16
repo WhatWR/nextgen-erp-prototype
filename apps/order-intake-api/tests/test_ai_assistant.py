@@ -105,6 +105,28 @@ CATALOG_PAGE = {
 
 
 class AIAssistantTest(unittest.TestCase):
+    def test_unmapped_customer_can_list_catalog_without_calling_the_model(self):
+        erp = FakeClient(
+            {
+                "nextgen_erp.api.get_catalog": [CATALOG_PAGE],
+                "nextgen_erp.ai.send_line_answer": [{"sent": True}],
+            }
+        )
+        transport = ScriptedAITransport([])
+        assistant = AIAssistant(
+            erp, StaticConfig(), warehouse="Stores - NG", ai_transport=transport
+        )
+        result = assistant.answer(
+            line_id="U-new", text="มีสินค้าอะไรบ้างครับ", event_id="evt-catalog", customer=None
+        )
+        self.assertTrue(result["answered"])
+        self.assertEqual(result["actions"], ["get_item_info"])
+        self.assertEqual(transport.requests, [])
+        sent = [c for c in erp.calls if c[0] == "nextgen_erp.ai.send_line_answer"][0][1]["text"]
+        self.assertIn("M-150", sent)
+        self.assertIn("390", sent)
+        self.assertNotIn("ลงทะเบียน", sent)
+
     def test_price_question_is_answered_from_the_live_catalog(self):
         erp = FakeClient(
             {
@@ -112,12 +134,7 @@ class AIAssistantTest(unittest.TestCase):
                 "nextgen_erp.ai.send_line_answer": [{"sent": True}],
             }
         )
-        transport = ScriptedAITransport(
-            [
-                tool_call("get_item_info", {"query": "M-150"}),
-                {"role": "assistant", "content": "M-150 ราคาลังละ 390 บาท มีของพร้อมส่งค่ะ"},
-            ]
-        )
+        transport = ScriptedAITransport([])
         assistant = AIAssistant(
             erp, StaticConfig(), warehouse="Stores - NG", ai_transport=transport
         )
@@ -125,6 +142,7 @@ class AIAssistantTest(unittest.TestCase):
         self.assertEqual(result["kind"], "ai_answer")
         self.assertTrue(result["answered"])
         self.assertEqual(result["actions"], ["get_item_info"])
+        self.assertEqual(transport.requests, [])
         send = [c for c in erp.calls if c[0] == "nextgen_erp.ai.send_line_answer"][0]
         self.assertIn("390", send[1]["text"])
         self.assertEqual(send[1]["line_id"], "U123")
@@ -219,7 +237,7 @@ class AIAssistantTest(unittest.TestCase):
             warehouse="Stores - NG",
             ai_transport=transport,
         )
-        result = assistant.answer(line_id="U123", text="ราคา M-150", event_id="evt-5")
+        result = assistant.answer(line_id="U123", text="ช่วยตรวจสอบข้อมูลให้หน่อย", event_id="evt-5")
         self.assertTrue(result["answered"])
         final_request = transport.requests[-1][1]
         self.assertEqual(final_request.get("tool_choice"), "none")

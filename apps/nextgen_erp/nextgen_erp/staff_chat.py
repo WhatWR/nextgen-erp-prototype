@@ -18,7 +18,7 @@ from typing import Any
 
 import frappe
 from frappe import _
-from frappe.utils import add_to_date, cint, flt, get_datetime, now_datetime, nowdate
+from frappe.utils import add_to_date, cint, flt, get_datetime, getdate, now_datetime, nowdate
 
 from nextgen_erp import agents
 from nextgen_erp.typhoon import TyphoonClient, TyphoonError
@@ -475,6 +475,101 @@ def cancel_action(action_id: str):
 		action.status = "Cancelled"
 		action.save(ignore_permissions=True)
 	return {"action_id": action.name, "status": action.status}
+
+
+@frappe.whitelist()
+def revise_action(action_id: str, changes=None):
+	"""Replace a pending procurement proposal with a newly validated preview.
+
+	The original proposal remains immutable and is marked Cancelled. This path
+	does not call Typhoon, so selecting a warehouse never consumes another turn.
+	"""
+	user = _require_staff()
+	frappe.db.sql("select name from `tabNextGen Chat Action` where name=%s for update", action_id)
+	action = frappe.get_doc("NextGen Chat Action", action_id)
+	if action.user != user:
+		frappe.throw(_("Chat action not found"), frappe.DoesNotExistError)
+	if action.agent_type != "procurement" or action.action_type not in {
+		"prepare_purchase_order",
+		"prepare_material_request",
+	}:
+		frappe.throw(_("Only procurement previews can be edited here"))
+	agents.require_agent_access("procurement", user)
+	if action.status != "Pending":
+		frappe.throw(_("This chat action is no longer pending"))
+	if get_datetime(action.expires_at) < now_datetime():
+		action.status = "Expired"
+		action.save(ignore_permissions=True)
+		frappe.throw(_("This chat action expired. Create a fresh preview."))
+
+	updates = _parse_json(changes, {})
+	if not isinstance(updates, dict):
+		frappe.throw(_("Invalid preview changes"))
+	allowed_fields = {"warehouse", "supplier", "schedule_date"}
+	if set(updates) - allowed_fields:
+		frappe.throw(_("Unsupported preview field"))
+	arguments = _parse_json(action.proposal_payload, {})
+	preview = _parse_json(action.preview, {})
+	company = preview.get("company")
+
+	warehouse = str(updates.get("warehouse") or "").strip()
+	if warehouse:
+		if not frappe.db.exists(
+			"Warehouse",
+			{"name": warehouse, "company": company, "is_group": 0, "disabled": 0},
+		):
+			frappe.throw(_("Please select an active receiving warehouse for this company"))
+		warehouse_doc = frappe.get_doc("Warehouse", warehouse)
+		if not frappe.has_permission("Warehouse", "read", doc=warehouse_doc):
+			frappe.throw(_("You do not have permission to use this warehouse"), frappe.PermissionError)
+		transit = frappe.db.get_value("Company", company, "default_in_transit_warehouse")
+		if warehouse == transit:
+			frappe.throw(_("The in-transit warehouse cannot receive this purchase"))
+		from nextgen_erp import forecast
+
+		allowed = forecast.get_settings()["allowed_warehouses"]
+		if allowed and warehouse not in allowed:
+			frappe.throw(_("Warehouse is not in Procurement Allowed Warehouses"))
+		arguments["warehouse"] = warehouse
+
+	if "supplier" in updates and action.action_type == "prepare_purchase_order":
+		supplier = str(updates.get("supplier") or "").strip()
+		if not supplier or not frappe.db.exists("Supplier", supplier):
+			frappe.throw(_("Please select a valid supplier"))
+		arguments["supplier"] = supplier
+
+	if "schedule_date" in updates:
+		schedule_date = str(updates.get("schedule_date") or "").strip()
+		if not schedule_date or getdate(schedule_date) < getdate(nowdate()):
+			frappe.throw(_("Schedule date cannot be in the past"))
+		arguments["schedule_date"] = schedule_date
+
+	from nextgen_erp import procurement
+
+	if action.action_type == "prepare_purchase_order":
+		replacement = procurement._prepare_purchase_order(
+			arguments, user=user, session_id=action.session
+		)
+	else:
+		replacement = procurement._prepare_material_request(
+			arguments, user=user, session_id=action.session
+		)
+	action.status = "Cancelled"
+	action.result_json = json.dumps(
+		{"reason": "superseded", "superseded_by": replacement["action_id"]},
+		ensure_ascii=False,
+	)
+	action.save(ignore_permissions=True)
+	message = frappe.db.get_value(
+		"NextGen Chat Message", {"action": action.name}, "name", order_by="creation desc"
+	)
+	if message:
+		frappe.db.set_value(
+			"NextGen Chat Message", message, "action", replacement["action_id"], update_modified=False
+		)
+	frappe.db.commit()
+	replacement["supersedes"] = action.name
+	return replacement
 
 
 def run_turn(user: str, session_id: str, turn_id: str, page_context=None):

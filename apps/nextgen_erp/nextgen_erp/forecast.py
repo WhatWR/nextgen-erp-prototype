@@ -65,6 +65,7 @@ def get_settings() -> dict[str, Any]:
 	return {
 		"enabled": bool(cint(doc.get("enable_procurement_copilot"))),
 		"model": (doc.get("procurement_model") or "").strip(),
+		"default_buying_warehouse": (doc.get("default_buying_warehouse") or "").strip(),
 		"horizon_days": max(7, cint(doc.get("default_forecast_horizon_days") or 30)),
 		"history_window_days": max(30, cint(doc.get("history_window_days") or 90)),
 		"safety_stock_days": max(0, cint(doc.get("safety_stock_days") or 7)),
@@ -90,12 +91,38 @@ def default_buying_warehouse(company: str | None = None) -> str | None:
 	)
 	if not company:
 		return None
-	return frappe.db.get_value(
+	settings = frappe.get_single("NextGen Procurement Settings")
+	allowed = [
+		line.strip()
+		for line in str(settings.get("allowed_warehouses") or "").splitlines()
+		if line.strip()
+	]
+	transit = frappe.db.get_value("Company", company, "default_in_transit_warehouse")
+	preferred = [
+		settings.get("default_buying_warehouse"),
+		*allowed,
+		frappe.defaults.get_user_default("Warehouse"),
+		frappe.db.get_single_value("Stock Settings", "default_warehouse"),
+	]
+	for warehouse in preferred:
+		if warehouse and warehouse != transit and frappe.db.exists(
+			"Warehouse",
+			{"name": warehouse, "company": company, "is_group": 0, "disabled": 0},
+		):
+			return warehouse
+	rows = frappe.get_all(
 		"Warehouse",
-		{"company": company, "is_group": 0, "disabled": 0},
-		"name",
-		order_by="creation asc",
+		filters={"company": company, "is_group": 0, "disabled": 0},
+		fields=["name", "warehouse_name", "creation"],
 	)
+	rows = [row for row in rows if row.name != transit]
+	rows.sort(
+		key=lambda row: (
+			0 if "store" in str(row.warehouse_name or "").casefold() else 1,
+			row.creation,
+		)
+	)
+	return rows[0].name if rows else None
 
 
 def _demand_history(item_code: str, history_days: int) -> dict[str, Any]:

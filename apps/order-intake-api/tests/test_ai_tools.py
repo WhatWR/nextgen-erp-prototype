@@ -113,9 +113,80 @@ class CatalogToolTest(unittest.TestCase):
         self.assertEqual(result["items"][0]["price"], 55)
 
     def test_missing_warehouse_is_a_soft_error(self):
-        tools = build_tools(make_ctx(FakeClient({}), warehouse=None))
+        client = FakeClient(
+            {
+                "nextgen_erp.api.get_catalog": [
+                    {
+                        "data": [
+                            {
+                                "item_code": "DRK-M150",
+                                "item_name": "เครื่องดื่ม M-150",
+                                "stock_uom": "ลัง",
+                                "price": 390,
+                                "projected_qty": None,
+                                "aliases": [],
+                            }
+                        ],
+                        "has_more": False,
+                        "next_start": 1,
+                    }
+                ]
+            }
+        )
+        tools = build_tools(make_ctx(client, warehouse=None))
         result = dispatch(tools, "get_item_info", {"query": "มาม่า"})
-        self.assertEqual(result["error"], "catalog_unavailable")
+        self.assertEqual(result["items"], [])
+        self.assertEqual(client.calls[0][1]["warehouse"], "")
+
+    def test_generic_catalog_question_lists_products(self):
+        client = FakeClient(
+            {
+                "nextgen_erp.api.get_catalog": [
+                    {
+                        "data": [
+                            {
+                                "item_code": "DRK-M150",
+                                "item_name": "เครื่องดื่ม M-150",
+                                "stock_uom": "ลัง",
+                                "price": 390,
+                                "projected_qty": 20,
+                                "aliases": [],
+                            }
+                        ],
+                        "has_more": False,
+                        "next_start": 1,
+                    }
+                ]
+            }
+        )
+        result = dispatch(build_tools(make_ctx(client)), "get_item_info", {"query": ""})
+        self.assertEqual(result["items"][0]["item_code"], "DRK-M150")
+
+    def test_price_words_are_removed_before_item_matching(self):
+        client = FakeClient(
+            {
+                "nextgen_erp.api.get_catalog": [
+                    {
+                        "data": [
+                            {
+                                "item_code": "DRK-M150",
+                                "item_name": "เครื่องดื่ม M-150",
+                                "stock_uom": "ลัง",
+                                "price": 390,
+                                "projected_qty": 20,
+                                "aliases": ["M-150"],
+                            }
+                        ],
+                        "has_more": False,
+                        "next_start": 1,
+                    }
+                ]
+            }
+        )
+        result = dispatch(
+            build_tools(make_ctx(client)), "get_item_info", {"query": "M-150 ราคาเท่าไหร่ครับ"}
+        )
+        self.assertEqual(result["items"][0]["item_code"], "DRK-M150")
 
 
 if __name__ == "__main__":

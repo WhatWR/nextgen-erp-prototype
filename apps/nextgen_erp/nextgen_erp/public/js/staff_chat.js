@@ -519,7 +519,7 @@
 			${preview.forecast_explanation ? `<div class="ng-forecast-footer">${escapeHtml(preview.forecast_explanation)}</div>` : ""}
 			<div class="ng-action-buttons" ${status !== "Pending" ? "hidden" : ""}>
 				<button data-confirm-action="${escapeHtml(action.action_id)}">ยืนยันและสร้าง</button>
-				<button class="secondary" data-edit-action="${escapeHtml(action.action_id)}">แก้ไข</button>
+				<button class="secondary" data-edit-action="${escapeHtml(action.action_id)}">แก้ข้อมูล</button>
 				<button class="secondary" data-cancel-action="${escapeHtml(action.action_id)}">ยกเลิก</button>
 			</div>
 			<div class="ng-action-result">${status !== "Pending" ? escapeHtml(status) : ""}${resultType && resultName ? ` · <button class="ng-doc-link" data-document-type="${escapeHtml(resultType)}" data-document-name="${escapeHtml(resultName)}">${escapeHtml(resultName)}</button>` : ""}</div>
@@ -612,10 +612,68 @@
 	function editAction(actionId) {
 		const action = state.actions.get(actionId);
 		if (!action || action.status !== "Pending") return;
-		const input = document.getElementById("nextgen-chat-input");
-		input.value = "แก้ไข preview ล่าสุด: ";
-		input.focus();
-		setStatus("พิมพ์สิ่งที่ต้องการแก้ เช่น จำนวน supplier หรือวันรับของ แล้วส่งเพื่อให้สร้าง preview ใหม่");
+		const preview = action.preview || {};
+		const isPO = action.action_type === "prepare_purchase_order" || preview.document_type === "Purchase Order";
+		const fields = [
+			{
+				fieldname: "warehouse",
+				fieldtype: "Link",
+				options: "Warehouse",
+				label: "คลังรับสินค้า",
+				reqd: 1,
+				default: preview.warehouse,
+				get_query: () => ({
+					filters: { company: preview.company, is_group: 0, disabled: 0 },
+				}),
+			},
+		];
+		if (isPO) {
+			fields.push({
+				fieldname: "supplier",
+				fieldtype: "Link",
+				options: "Supplier",
+				label: "Supplier",
+				reqd: 1,
+				default: preview.supplier,
+			});
+		}
+		fields.push({
+			fieldname: "schedule_date",
+			fieldtype: "Date",
+			label: "กำหนดรับของ",
+			reqd: 1,
+			default: preview.schedule_date,
+		});
+		const dialog = new frappe.ui.Dialog({
+			title: "แก้ไข Procurement Preview",
+			fields,
+			primary_action_label: "อัปเดต Preview",
+			primary_action: async (values) => {
+				const primary = dialog.get_primary_btn();
+				primary.prop("disabled", true);
+				try {
+					const replacement = await call("revise_action", {
+						action_id: actionId,
+						changes: JSON.stringify(values),
+					});
+					action.status = "Cancelled";
+					const nextAction = { ...replacement, action_id: replacement.action_id };
+					state.actions.set(replacement.action_id, nextAction);
+					for (const message of state.messages) {
+						if (message.action?.action_id === actionId) message.action = nextAction;
+					}
+					dialog.hide();
+					setStatus("อัปเดต Preview จากข้อมูล ERP แล้ว โดยไม่เรียก AI ใหม่");
+					frappe.show_alert({ message: "อัปเดตคลังและ Preview แล้ว", indicator: "green" });
+					render();
+				} catch (error) {
+					frappe.msgprint(error?.message || "อัปเดต Preview ไม่สำเร็จ");
+				} finally {
+					primary.prop("disabled", false);
+				}
+			},
+		});
+		dialog.show();
 	}
 
 	async function confirmAction(actionId) {

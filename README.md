@@ -83,6 +83,23 @@ bench --site nextgen.localhost run-tests --app nextgen_erp
 bench --site nextgen.localhost set-config allow_tests false
 ```
 
+## Seed the ICONHOME production demo
+
+The production demo seed is deliberately opt-in, idempotent and non-destructive.
+It creates clearly labelled demo customers, suppliers, construction materials,
+stock and one **Draft** Sales Invoice; it never changes the site's default
+company and never submits the invoice to the ledger. Take a database backup,
+then run:
+
+```bash
+bench --site <site> execute nextgen_erp.seed.run \
+  --kwargs '{"confirm":"SEED_ICONHOME_DEMO"}'
+```
+
+Re-running the command preserves existing records and only fills missing demo
+data. The `NextGen Customer Invoice` print format is installed during migrate
+and is used automatically by signed invoice links sent from the LINE AI flow.
+
 ## Repository map
 
 | Path | Purpose |

@@ -20,6 +20,8 @@ class IntegrationTestProcurementCopilot(IntegrationTestCase):
 		frappe.db.set_single_value("NextGen Procurement Settings", "automation_mode", "Approval Required")
 		frappe.db.set_single_value("NextGen Procurement Settings", "maximum_po_value", 1000000)
 		frappe.db.set_single_value("NextGen Procurement Settings", "maximum_price_variance_percent", 10)
+		frappe.db.set_single_value("NextGen Procurement Settings", "default_buying_warehouse", "")
+		frappe.db.set_single_value("NextGen Procurement Settings", "allowed_warehouses", "")
 
 	def _session(self):
 		return frappe.get_doc(
@@ -100,6 +102,42 @@ class IntegrationTestProcurementCopilot(IntegrationTestCase):
 		)
 		with self.assertRaises(frappe.ValidationError):
 			staff_chat.confirm_action(result["action_id"])
+
+	def test_pending_preview_can_select_warehouse_without_new_ai_turn(self):
+		company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
+			"Global Defaults", "default_company"
+		)
+		abbr = frappe.db.get_value("Company", company, "abbr")
+		warehouse = f"Procurement Revision - {abbr}"
+		if not frappe.db.exists("Warehouse", warehouse):
+			frappe.get_doc(
+				{
+					"doctype": "Warehouse",
+					"warehouse_name": "Procurement Revision",
+					"company": company,
+					"is_group": 0,
+				}
+			).insert(ignore_permissions=True)
+		result = self._prepare()
+		original = frappe.get_doc("NextGen Chat Action", result["action_id"])
+		original_payload = original.proposal_payload
+		revised = staff_chat.revise_action(
+			result["action_id"],
+			{"warehouse": warehouse, "schedule_date": add_days(nowdate(), 7)},
+		)
+		self.assertNotEqual(revised["action_id"], result["action_id"])
+		self.assertEqual(revised["preview"]["warehouse"], warehouse)
+		self.assertTrue(all(row["warehouse"] == warehouse for row in revised["preview"]["items"]))
+		original.reload()
+		self.assertEqual(original.status, "Cancelled")
+		self.assertEqual(original.proposal_payload, original_payload)
+
+	def test_default_buying_warehouse_never_uses_transit(self):
+		company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
+			"Global Defaults", "default_company"
+		)
+		transit = frappe.db.get_value("Company", company, "default_in_transit_warehouse")
+		self.assertNotEqual(forecast.default_buying_warehouse(company), transit)
 
 	def test_shadow_mode_never_creates_buying_documents(self):
 		frappe.db.set_single_value("NextGen Procurement Settings", "automation_mode", "Shadow")

@@ -1,6 +1,8 @@
 # Copyright (c) 2026, NextGen and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -37,3 +39,24 @@ class IntegrationTestLINEChannelSettings(IntegrationTestCase):
 	def test_tampered_invoice_link_is_rejected(self):
 		with self.assertRaises(frappe.PermissionError):
 			api.download_invoice("tampered.payload")
+
+	def test_valid_signed_link_can_render_for_guest_and_restores_permission_flag(self):
+		previous_user = frappe.session.user
+		previous_flag = getattr(frappe.local.flags, "ignore_print_permissions", False)
+		try:
+			frappe.set_user("Guest")
+			with (
+				patch.object(api, "_decode_invoice_token", return_value={"invoice": "SINV-DEMO"}),
+				patch.object(frappe, "get_print", return_value=b"%PDF-demo") as get_print,
+			):
+				api.download_invoice("valid.signed-token")
+				self.assertEqual(frappe.local.response.filecontent, b"%PDF-demo")
+				self.assertEqual(
+					get_print.call_args.kwargs["print_format"], "NextGen Customer Invoice"
+				)
+				self.assertEqual(
+					frappe.local.flags.ignore_print_permissions, previous_flag
+				)
+		finally:
+			frappe.local.flags.ignore_print_permissions = previous_flag
+			frappe.set_user(previous_user)

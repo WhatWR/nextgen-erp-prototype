@@ -1,0 +1,90 @@
+{% set company = frappe.get_doc("Company", doc.company) %}
+{% set company_address = frappe.get_all("Dynamic Link", filters={"link_doctype": "Company", "link_name": doc.company, "parenttype": "Address"}, pluck="parent", limit=1) %}
+{% set company_address_doc = frappe.get_doc("Address", company_address[0]) if company_address else none %}
+{% set customer_address_doc = frappe.get_doc("Address", doc.customer_address) if doc.customer_address else none %}
+
+<div class="ng-invoice">
+  <div class="ng-accent"></div>
+  <header class="ng-header">
+    <div class="ng-brand">
+      <div class="ng-mark">NG</div>
+      <div>
+        <h1>{{ doc.company }}</h1>
+        {% if company.company_name != doc.company %}<div class="ng-company-en">{{ company.company_name }}</div>{% endif %}
+        {% if company_address_doc %}
+          <div class="ng-muted ng-address">{{ company_address_doc.address_line1 }}</div>
+        {% endif %}
+        {% if company.tax_id %}<div class="ng-muted">เลขประจำตัวผู้เสียภาษี / Tax ID: {{ company.tax_id }}</div>{% endif %}
+      </div>
+    </div>
+    <div class="ng-title">
+      <h2>ใบแจ้งหนี้</h2>
+      <div>INVOICE</div>
+      {% if doc.docstatus == 0 %}<span class="ng-draft">DRAFT / ฉบับร่าง</span>{% endif %}
+    </div>
+  </header>
+
+  <section class="ng-meta-grid">
+    <div class="ng-card ng-bill-to">
+      <div class="ng-label">เรียกเก็บเงินจาก / BILL TO</div>
+      <div class="ng-value">{{ doc.customer_name or doc.customer }}</div>
+      {% if doc.tax_id %}<div>เลขประจำตัวผู้เสียภาษี: {{ doc.tax_id }}</div>{% endif %}
+      {% if customer_address_doc %}<div class="ng-muted ng-address">{{ customer_address_doc.address_line1 }}</div>{% endif %}
+      {% if doc.contact_email %}<div class="ng-muted">{{ doc.contact_email }}</div>{% endif %}
+    </div>
+    <div class="ng-card ng-meta">
+      <div><span>เลขที่ / Invoice no.</span><strong>{{ doc.name }}</strong></div>
+      <div><span>วันที่ / Date</span><strong>{{ frappe.utils.formatdate(doc.posting_date, "dd/MM/yyyy") }}</strong></div>
+      <div><span>ครบกำหนด / Due date</span><strong>{{ frappe.utils.formatdate(doc.due_date, "dd/MM/yyyy") if doc.due_date else "-" }}</strong></div>
+      <div><span>สกุลเงิน / Currency</span><strong>{{ doc.currency }}</strong></div>
+    </div>
+  </section>
+
+  <table class="ng-items">
+    <thead>
+      <tr>
+        <th class="ng-no">#</th>
+        <th>รายการ / Description</th>
+        <th class="ng-right">จำนวน / Qty</th>
+        <th class="ng-right">ราคา / Unit price</th>
+        <th class="ng-right">จำนวนเงิน / Amount</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in doc.items %}
+      <tr>
+        <td class="ng-no">{{ loop.index }}</td>
+        <td>
+          <div class="ng-item-name">{{ item.item_name or item.item_code }}</div>
+          <div class="ng-muted">{{ item.item_code }}{% if item.description and item.description != item.item_name %} - {{ item.description | striptags }}{% endif %}</div>
+        </td>
+        <td class="ng-right">{{ frappe.utils.fmt_money(item.qty, precision=2) }} {{ item.uom }}</td>
+        <td class="ng-right">{{ frappe.utils.fmt_money(item.rate, precision=2) }}</td>
+        <td class="ng-right">{{ frappe.utils.fmt_money(item.amount, precision=2) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <section class="ng-summary">
+    <div class="ng-note">
+      <div class="ng-label">หมายเหตุ / NOTE</div>
+      <div>{{ doc.remarks or "กรุณาชำระเงินตามกำหนด และระบุเลขที่ใบแจ้งหนี้ในการโอนเงิน" }}</div>
+      {% if doc.po_no %}<div class="ng-muted">เลขที่ PO ลูกค้า: {{ doc.po_no }}</div>{% endif %}
+    </div>
+    <div class="ng-totals">
+      <div><span>รวมก่อนภาษี / Subtotal</span><strong>{{ frappe.utils.fmt_money(doc.net_total, currency=doc.currency) }}</strong></div>
+      {% for tax in doc.taxes %}
+      {% if tax.tax_amount %}<div><span>{{ tax.description }}</span><strong>{{ frappe.utils.fmt_money(tax.tax_amount, currency=doc.currency) }}</strong></div>{% endif %}
+      {% endfor %}
+      {% if doc.discount_amount %}<div><span>ส่วนลด / Discount</span><strong>-{{ frappe.utils.fmt_money(doc.discount_amount, currency=doc.currency) }}</strong></div>{% endif %}
+      <div class="ng-grand-total"><span>ยอดสุทธิ / TOTAL</span><strong>{{ frappe.utils.fmt_money(doc.rounded_total or doc.grand_total, currency=doc.currency) }}</strong></div>
+      {% if doc.outstanding_amount is not none %}<div class="ng-outstanding"><span>ยอดคงค้าง / Outstanding</span><strong>{{ frappe.utils.fmt_money(doc.outstanding_amount, currency=doc.currency) }}</strong></div>{% endif %}
+    </div>
+  </section>
+
+  <footer class="ng-footer">
+    <div>เอกสารนี้สร้างจาก NextGen ERP</div>
+    <div>สอบถามข้อมูลหรือขอสำเนาเอกสารได้ผ่าน AI Sales Copilot</div>
+  </footer>
+</div>

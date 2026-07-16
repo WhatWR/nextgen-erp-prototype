@@ -97,10 +97,32 @@ class IntegrationTestAIOrderIntake(IntegrationTestCase):
 		name = created["name"]
 		api.approve_ai_order_intake(name)
 		invoiced = api.record_customer_confirmation(name, 1)
+		invoiced_retry = api.record_customer_confirmation(name, 1)
 		paid = api.progress_payment(name, f"TEST-{frappe.generate_hash(length=8)}")
+		paid_retry = api.progress_payment(name, "DUPLICATE-MUST-NOT-CREATE")
+		self.assertEqual(frappe.db.get_value("Delivery Note", paid["delivery_note"], "docstatus"), 0)
 		delivered = api.complete_delivery(name)
+		delivered_retry = api.complete_delivery(name)
+		self.assertTrue(invoiced_retry["already"])
+		self.assertEqual(invoiced_retry["sales_order"], invoiced["sales_order"])
+		self.assertEqual(invoiced_retry["sales_invoice"], invoiced["sales_invoice"])
+		self.assertTrue(paid_retry["already"])
+		self.assertEqual(paid_retry["payment_entry"], paid["payment_entry"])
+		self.assertTrue(delivered_retry["already"])
+		self.assertEqual(delivered_retry["delivery_note"], delivered["delivery_note"])
 		self.assertEqual(frappe.db.get_value("Sales Order", invoiced["sales_order"], "docstatus"), 1)
 		self.assertEqual(frappe.db.get_value("Pick List", invoiced["pick_list"], "docstatus"), 1)
+		self.assertGreater(
+			frappe.db.count(
+				"Stock Reservation Entry",
+				{
+					"from_voucher_type": "Pick List",
+					"from_voucher_no": invoiced["pick_list"],
+					"docstatus": 1,
+				},
+			),
+			0,
+		)
 		self.assertEqual(frappe.db.get_value("Sales Invoice", invoiced["sales_invoice"], "docstatus"), 1)
 		self.assertEqual(frappe.db.get_value("Payment Entry", paid["payment_entry"], "docstatus"), 1)
 		self.assertEqual(frappe.db.get_value("Delivery Note", delivered["delivery_note"], "docstatus"), 1)

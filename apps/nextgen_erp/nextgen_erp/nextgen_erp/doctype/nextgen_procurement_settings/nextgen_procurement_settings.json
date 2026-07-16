@@ -6,6 +6,7 @@
   "enable_procurement_copilot",
   "procurement_model",
   "column_break_general",
+  "default_buying_warehouse",
   "automation_mode",
   "allow_direct_po_submission",
   "section_forecast",
@@ -47,6 +48,13 @@
   {
    "fieldname": "column_break_general",
    "fieldtype": "Column Break"
+  },
+  {
+   "description": "Warehouse used for procurement previews when the user did not explicitly choose one.",
+   "fieldname": "default_buying_warehouse",
+   "fieldtype": "Link",
+   "label": "Default Buying Warehouse",
+   "options": "Warehouse"
   },
   {
    "default": "Shadow",

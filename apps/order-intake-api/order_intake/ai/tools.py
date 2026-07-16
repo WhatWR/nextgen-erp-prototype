@@ -11,6 +11,7 @@ apologise with — they never abort the answer loop.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import re
 from typing import Any, Callable
 
 from ..erpnext_client import ERPNextClient, ERPNextError
@@ -18,8 +19,24 @@ from .rag import KnowledgeIndex, _ngrams
 
 CATALOG_PAGE_SIZE = 500
 CATALOG_MAX_PAGES = 2
-ITEM_RESULT_LIMIT = 5
+ITEM_RESULT_LIMIT = 8
 CONFIRM_EVENT_SUFFIX = ":ai-confirm"
+
+_CATALOG_QUERY_WORDS = (
+    "ราคา",
+    "เท่าไหร่",
+    "กี่บาท",
+    "มีของไหม",
+    "มีไหม",
+    "สต็อก",
+    "stock",
+    "สินค้า",
+    "ขายอะไร",
+    "มีอะไรบ้าง",
+    "ครับ",
+    "ค่ะ",
+    "คะ",
+)
 
 
 @dataclass
@@ -63,19 +80,25 @@ def _score_item(query: str, row: dict[str, Any]) -> float:
     return len(query_grams & _ngrams(target)) / len(query_grams)
 
 
+def _clean_item_query(query: str) -> str:
+    """Remove question words so a Thai price question ranks the product itself."""
+    cleaned = (query or "").strip().lower()
+    for word in _CATALOG_QUERY_WORDS:
+        cleaned = cleaned.replace(word, " ")
+    return re.sub(r"\s+", " ", cleaned).strip(" ?")
+
+
 def build_tools(ctx: ToolContext) -> dict[str, ToolSpec]:
     def get_my_orders() -> dict[str, Any]:
         return ctx.client.call_method("nextgen_erp.ai.get_customer_context", line_id=ctx.line_id)
 
     def get_item_info(query: str = "") -> dict[str, Any]:
-        if not ctx.warehouse:
-            return {"error": "catalog_unavailable", "detail": "no warehouse configured"}
         rows: list[dict[str, Any]] = []
         start = 0
         for _ in range(CATALOG_MAX_PAGES):
             page = ctx.client.call_method(
                 "nextgen_erp.api.get_catalog",
-                warehouse=ctx.warehouse,
+                warehouse=ctx.warehouse or "",
                 limit_start=start,
                 limit=CATALOG_PAGE_SIZE,
             )
@@ -85,12 +108,26 @@ def build_tools(ctx: ToolContext) -> dict[str, ToolSpec]:
             if not page.get("has_more"):
                 break
             start = int(page.get("next_start") or (start + CATALOG_PAGE_SIZE))
-        scored = sorted(
-            ((_score_item(query, row), row) for row in rows),
-            key=lambda pair: pair[0],
-            reverse=True,
-        )
-        matches = [row for score, row in scored if score > 0][:ITEM_RESULT_LIMIT]
+        cleaned_query = _clean_item_query(query)
+        if cleaned_query:
+            scored = sorted(
+                ((_score_item(cleaned_query, row), row) for row in rows),
+                key=lambda pair: pair[0],
+                reverse=True,
+            )
+            matches = [row for score, row in scored if score > 0][:ITEM_RESULT_LIMIT]
+        else:
+            # A generic question such as "มีสินค้าอะไรบ้าง" should list the
+            # live catalog, not return an empty result because there is no SKU
+            # term to rank. Prefer items that are actually available.
+            matches = sorted(
+                rows,
+                key=lambda row: (
+                    row.get("projected_qty") is None,
+                    -(float(row.get("projected_qty") or 0)),
+                    str(row.get("item_code") or ""),
+                ),
+            )[:ITEM_RESULT_LIMIT]
         return {
             "items": [
                 {
@@ -99,9 +136,12 @@ def build_tools(ctx: ToolContext) -> dict[str, ToolSpec]:
                     "uom": row.get("stock_uom"),
                     "price": row.get("price"),
                     "available_qty": row.get("projected_qty"),
+                    "warehouse": row.get("warehouse") or ctx.warehouse,
                 }
                 for row in matches
-            ]
+            ],
+            "catalog_count": len(rows),
+            "query": cleaned_query,
         }
 
     def search_knowledge(question: str = "") -> dict[str, Any]:
@@ -149,13 +189,14 @@ def build_tools(ctx: ToolContext) -> dict[str, ToolSpec]:
         ToolSpec(
             name="get_item_info",
             description=(
-                "Search the live product catalog by (Thai) product name. Returns matching items "
-                "with the real selling price and available stock. Prices MUST come from here."
+                "Search or list the live product catalog. Use an empty query when the customer "
+                "asks what products are available. Returns real selling prices and, when a "
+                "warehouse is configured, available stock. Prices MUST come from here."
             ),
             parameters={
                 "type": "object",
                 "properties": {"query": {"type": "string", "description": "product name to search"}},
-                "required": ["query"],
+                "required": [],
             },
             handler=get_item_info,
         ),

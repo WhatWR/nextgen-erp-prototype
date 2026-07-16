@@ -51,11 +51,17 @@ def before_install() -> None:
 def after_install() -> None:
 	_ensure_role()
 	_ensure_custom_fields()
+	from nextgen_erp.print_formats import ensure_print_formats
+
+	ensure_print_formats()
 
 
 def after_migrate() -> None:
 	_ensure_role()
 	_ensure_custom_fields()
+	from nextgen_erp.print_formats import ensure_print_formats
+
+	ensure_print_formats()
 	# Workspace Sidebar is database-backed rather than exported with the
 	# standard Workspace JSON. Refresh it after migrations so every production
 	# site exposes the complete Order Agent navigation without requiring users

@@ -695,6 +695,7 @@ def progress_payment(name: str, reference_no: str | None = None):
             "name": name,
             "status": doc.status,
             "payment_entry": doc.payment_entry,
+            "delivery_note": doc.delivery_note,
             "already": True,
         }
     if doc.status not in ("Awaiting Payment", "Payment Review"):
@@ -729,7 +730,12 @@ def complete_delivery(name: str):
     _require_operations_role()
     doc = _lock_intake(name)
     if doc.status == "Delivered":
-        return {"name": name, "status": doc.status, "already": True}
+        return {
+            "name": name,
+            "status": doc.status,
+            "delivery_note": doc.delivery_note,
+            "already": True,
+        }
     if doc.status != "Ready for Delivery" or not doc.delivery_note:
         frappe.throw(_("Intake must be Ready for Delivery"))
     delivery_note = frappe.get_doc("Delivery Note", doc.delivery_note)
@@ -954,9 +960,22 @@ def approve_payment_slip(name: str, reference_no: str):
 
 
 @frappe.whitelist()
-def get_catalog(warehouse: str, price_list: str | None = None, limit_start: int = 0, limit: int = 500):
+def get_catalog(warehouse: str | None = None, price_list: str | None = None, limit_start: int = 0, limit: int = 500):
     """Return a page of sellable catalog data in three database reads."""
     _require_service_role()
+    warehouse = (warehouse or "").strip() or None
+    if warehouse and not frappe.db.exists(
+        "Warehouse", {"name": warehouse, "is_group": 0, "disabled": 0}
+    ):
+        warehouse = None
+    if not warehouse:
+        company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
+            "Global Defaults", "default_company"
+        )
+        warehouse = _default_warehouse(company) if company else None
+    price_list = (price_list or "").strip() or frappe.db.get_single_value(
+        "Selling Settings", "selling_price_list"
+    )
     limit = min(max(int(limit or 500), 1), 1000)
     limit_start = max(int(limit_start or 0), 0)
     fields = ["item_code", "item_name", "stock_uom", "standard_rate", "item_group"]
@@ -976,7 +995,7 @@ def get_catalog(warehouse: str, price_list: str | None = None, limit_start: int 
         fields=["item_code", "projected_qty"],
         filters={"warehouse": warehouse, "item_code": ["in", codes]},
         limit_page_length=max(len(codes), 1),
-    ) if codes else []
+    ) if codes and warehouse else []
     prices = frappe.get_all(
         "Item Price",
         fields=["item_code", "price_list_rate"],
@@ -1003,7 +1022,10 @@ def get_catalog(warehouse: str, price_list: str | None = None, limit_start: int 
                 "item_group": row.item_group,
                 "aliases": aliases,
                 "price": price_by_item.get(row.item_code, flt(row.standard_rate)),
-                "projected_qty": stock_by_item.get(row.item_code, 0),
+                # Without a configured warehouse we can still answer public
+                # catalog/price questions, but must not claim a stock number.
+                "projected_qty": stock_by_item.get(row.item_code, 0) if warehouse else None,
+                "warehouse": warehouse or None,
             }
         )
     return {"data": data, "has_more": len(items) == limit, "next_start": limit_start + len(items)}
@@ -1079,7 +1101,22 @@ def download_invoice(token: str):
     except (ValueError, TypeError, json.JSONDecodeError):
         frappe.throw(_("This invoice link is invalid or expired"), frappe.PermissionError)
     frappe.local.response.filename = f"{invoice}.pdf"
-    frappe.local.response.filecontent = frappe.get_print("Sales Invoice", invoice, as_pdf=True)
+    from nextgen_erp.print_formats import CUSTOMER_INVOICE_PRINT_FORMAT
+
+    previous_ignore = getattr(frappe.local.flags, "ignore_print_permissions", False)
+    try:
+        # The signed, expiring token is the authorization boundary for this
+        # guest endpoint. Frappe's print renderer otherwise checks the Guest
+        # role again and rejects even a valid customer link.
+        frappe.local.flags.ignore_print_permissions = True
+        frappe.local.response.filecontent = frappe.get_print(
+            "Sales Invoice",
+            invoice,
+            print_format=CUSTOMER_INVOICE_PRINT_FORMAT,
+            as_pdf=True,
+        )
+    finally:
+        frappe.local.flags.ignore_print_permissions = previous_ignore
     frappe.local.response.type = "pdf"
     return None
 

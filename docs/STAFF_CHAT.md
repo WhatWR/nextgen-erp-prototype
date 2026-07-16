@@ -27,7 +27,22 @@ field and is never returned to the browser.
 
 Run `bench --site <site> migrate`, restart workers, clear the Desk cache and
 reload. A purple assistant launcher appears at the bottom-right for System
-Manager, Sales Manager and Sales User accounts.
+Manager, Sales Manager, Sales User, Purchase Manager, Purchase User and Stock
+Manager accounts (each user only sees the agents allowed by their roles).
+
+If the launcher is missing after a production deployment, verify the server
+bootstrap first:
+
+```bash
+bench --site <site> execute nextgen_erp.staff_chat.get_status
+```
+
+`enabled` must be `true` and `agents` must contain at least one entry. If it is
+false, enable **NextGen AI Settings → Enable Staff Chat** and the relevant agent
+switch, then run `bench --site <site> migrate`, `bench build --app nextgen_erp`,
+`bench --site <site> clear-cache`, restart the web/workers and hard-refresh the
+Desk. In Docker, rebuild and recreate the ERP services rather than restarting
+containers that still use the old image.
 
 ## Safe action flow
 
@@ -45,6 +60,11 @@ Manager, Sales Manager and Sales User accounts.
 
 Confirmation, retry and duplicate clicks reuse the action idempotency key. V1
 does not expose delivery, invoice, payment, accounting, cancel or delete tools.
+
+Procurement previews can be revised directly from their card. **แก้ข้อมูล**
+opens ERP Link/Date fields for Warehouse, Supplier and Schedule Date. Saving
+creates a newly validated immutable proposal and cancels the old proposal for
+audit; it does not call Typhoon or consume another chat turn.
 
 ## Persistence and operations
 

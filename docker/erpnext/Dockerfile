@@ -2,6 +2,9 @@ ARG ERPNEXT_VERSION=v16.20.0
 FROM frappe/erpnext:${ERPNEXT_VERSION}
 
 USER root
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-noto-core \
+    && rm -rf /var/lib/apt/lists/*
 COPY --chown=frappe:frappe apps/nextgen_erp /home/frappe/frappe-bench/apps/nextgen_erp
 
 USER frappe

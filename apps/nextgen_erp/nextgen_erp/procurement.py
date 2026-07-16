@@ -42,6 +42,7 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยฝ่ายจัด�
 6. ห้ามพูดว่า Material Request หรือ Purchase Order ถูกสร้าง จนกว่า execution result จะมีเลขเอกสารจริง
 7. หาก supplier, สินค้า, จำนวน, UOM หรือบริษัทกำกวม ให้ถามกลับ ห้ามเลือกเอง
 8. ตอบสั้น ชัดเจน และอ้างอิงคำเตือน (warnings) จาก tool ทุกครั้งที่มี
+9. ห้ามเดาหรือเลือก warehouse เอง ถ้าผู้ใช้ไม่ได้ระบุ warehouse ให้เว้น field นี้เพื่อให้ ERP ใช้ Default Buying Warehouse
 """
 
 ACTION_PREVIEW_TEXT = (
@@ -718,6 +719,34 @@ def _create_action(
 	}
 
 
+def _resolve_preview_warehouse(
+	company: str | None, requested: str | None, settings: dict
+) -> tuple[str | None, list[str]]:
+	"""Resolve a receiving warehouse without ever falling back to transit stock."""
+	warnings: list[str] = []
+	requested = str(requested or "").strip()
+	allowed = settings.get("allowed_warehouses") or []
+	if requested:
+		valid = bool(
+			company
+			and frappe.db.exists(
+				"Warehouse",
+				{"name": requested, "company": company, "is_group": 0, "disabled": 0},
+			)
+		)
+		transit = frappe.db.get_value("Company", company, "default_in_transit_warehouse") if company else None
+		if not valid or requested == transit:
+			warnings.append(f"คลังรับสินค้าไม่ถูกต้องหรือเป็นคลังระหว่างทาง: {requested}")
+		elif allowed and requested not in allowed:
+			warnings.append(f"คลัง {requested} ไม่อยู่ใน Allowed Warehouses")
+		else:
+			return requested, warnings
+	warehouse = forecast.default_buying_warehouse(company)
+	if requested and warehouse and warehouse != requested:
+		warnings.append(f"เปลี่ยนไปใช้คลังรับซื้อเริ่มต้น: {warehouse}")
+	return warehouse, warnings
+
+
 def _prepare_purchase_order(arguments: dict, *, user: str, session_id: str) -> dict:
 	from nextgen_erp.staff_chat import _best_match, _defaults
 
@@ -740,7 +769,10 @@ def _prepare_purchase_order(arguments: dict, *, user: str, session_id: str) -> d
 			warnings.append(f"Supplier ถูกระงับ (on hold): {supplier}")
 
 	company, _sales_warehouse = _defaults()
-	warehouse = str(arguments.get("warehouse") or "").strip() or forecast.default_buying_warehouse(company)
+	warehouse, warehouse_warnings = _resolve_preview_warehouse(
+		company, arguments.get("warehouse"), settings
+	)
+	warnings.extend(warehouse_warnings)
 	if not company:
 		warnings.append("ยังไม่ได้กำหนดบริษัทเริ่มต้น")
 	if not warehouse:
@@ -802,7 +834,10 @@ def _prepare_material_request(arguments: dict, *, user: str, session_id: str) ->
 	settings = forecast.get_settings()
 	warnings: list[str] = []
 	company, _sales_warehouse = _defaults()
-	warehouse = str(arguments.get("warehouse") or "").strip() or forecast.default_buying_warehouse(company)
+	warehouse, warehouse_warnings = _resolve_preview_warehouse(
+		company, arguments.get("warehouse"), settings
+	)
+	warnings.extend(warehouse_warnings)
 	if not company:
 		warnings.append("ยังไม่ได้กำหนดบริษัทเริ่มต้น")
 	requested_items = arguments.get("items") if isinstance(arguments.get("items"), list) else []
