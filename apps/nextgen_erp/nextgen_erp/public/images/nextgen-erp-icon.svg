@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="NextGen ERP">
+  <defs>
+    <linearGradient id="erp-gradient" x1="8" y1="6" x2="56" y2="58" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0f766e"/>
+      <stop offset="1" stop-color="#2563eb"/>
+    </linearGradient>
+  </defs>
+  <rect x="2" y="2" width="60" height="60" rx="18" fill="url(#erp-gradient)"/>
+  <rect x="13" y="15" width="38" height="34" rx="8" fill="#fff"/>
+  <path d="M21 24h22M21 32h9M34 32h9M21 40h9M34 40h9" fill="none" stroke="#2563eb" stroke-width="4" stroke-linecap="round"/>
+  <circle cx="16" cy="16" r="5" fill="#f97316" stroke="#fff" stroke-width="3"/>
+</svg>

@@ -1,17 +1,17 @@
 {
  "app": "nextgen_erp",
  "charts": [],
- "content": "[{\"id\": \"logo\", \"type\": \"paragraph\", \"data\": {\"text\": \"<img src=\\\"/assets/nextgen_erp/images/nextgen-logo.svg\\\" alt=\\\"NextGen Order AI\\\" style=\\\"height:44px\\\">\", \"col\": 12}}, {\"id\": \"hdr\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\">Order Intake</span>\", \"col\": 12}}, {\"id\": \"sc1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Review Queue\", \"col\": 3}}, {\"id\": \"sc2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"LINE Channel Settings\", \"col\": 3}}, {\"id\": \"sc3\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Automation Settings\", \"col\": 3}}, {\"id\": \"sc4\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Payment Settings\", \"col\": 3}}, {\"id\": \"sc5\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"AI Assistant Settings\", \"col\": 3}}, {\"id\": \"nc0\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"NextGen Needs Review\", \"col\": 3}}, {\"id\": \"nc1\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"NextGen Awaiting Customer\", \"col\": 3}}, {\"id\": \"nc2\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"NextGen Reserved\", \"col\": 3}}, {\"id\": \"nc3\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"NextGen Paid\", \"col\": 3}}]",
+ "content": "[{\"id\": \"logo\", \"type\": \"paragraph\", \"data\": {\"text\": \"<img src=\\\"/assets/nextgen_erp/images/nextgen-logo.svg\\\" alt=\\\"NextGen ERP\\\" style=\\\"height:44px\\\">\", \"col\": 12}}, {\"id\": \"hdr\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\">AI Sales Copilot</span>\", \"col\": 12}}, {\"id\": \"sc1\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Review Queue\", \"col\": 3}}, {\"id\": \"sc2\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"LINE Channel Settings\", \"col\": 3}}, {\"id\": \"sc3\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Automation Settings\", \"col\": 3}}, {\"id\": \"sc4\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"Payment Settings\", \"col\": 3}}, {\"id\": \"sc5\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"AI Assistant Settings\", \"col\": 3}}, {\"id\": \"nc0\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"NextGen Needs Review\", \"col\": 3}}, {\"id\": \"nc1\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"NextGen Awaiting Customer\", \"col\": 3}}, {\"id\": \"nc2\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"NextGen Reserved\", \"col\": 3}}, {\"id\": \"nc3\", \"type\": \"number_card\", \"data\": {\"number_card_name\": \"NextGen Paid\", \"col\": 3}}]",
  "creation": "2026-07-13 10:57:44.797326",
  "custom_blocks": [],
  "docstatus": 0,
  "doctype": "Workspace",
  "hide_custom": 0,
- "icon": "sell",
+ "icon": "sparkles",
  "idx": 0,
  "indicator_color": "green",
  "is_hidden": 0,
- "label": "Order Agent",
+ "label": "AI Sales Copilot",
  "link_type": "DocType",
  "links": [
   {
@@ -106,7 +106,7 @@
  "modified": "2026-07-13 10:57:44.797326",
  "modified_by": "Administrator",
  "module": "NextGen ERP",
- "name": "Order Agent",
+ "name": "AI Sales Copilot",
  "number_cards": [
   {
    "number_card_name": "NextGen Needs Review"
@@ -163,6 +163,6 @@
    "type": "DocType"
   }
  ],
- "title": "Order Agent",
+ "title": "AI Sales Copilot",
  "type": "Workspace"
 }

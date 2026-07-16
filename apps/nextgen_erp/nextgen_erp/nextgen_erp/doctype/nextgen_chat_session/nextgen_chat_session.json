@@ -1,0 +1,19 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["user", "title", "status", "last_activity_at"],
+ "fields": [
+  {"fieldname": "user", "fieldtype": "Link", "in_list_view": 1, "label": "User", "options": "User", "reqd": 1},
+  {"fieldname": "title", "fieldtype": "Data", "in_list_view": 1, "label": "Title", "reqd": 1},
+  {"default": "Open", "fieldname": "status", "fieldtype": "Select", "label": "Status", "options": "Open\nArchived", "reqd": 1},
+  {"fieldname": "last_activity_at", "fieldtype": "Datetime", "in_list_view": 1, "label": "Last Activity At", "reqd": 1}
+ ],
+ "module": "NextGen ERP",
+ "name": "NextGen Chat Session",
+ "permissions": [{"create": 1, "delete": 1, "read": 1, "role": "System Manager", "write": 1}],
+ "sort_field": "last_activity_at",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

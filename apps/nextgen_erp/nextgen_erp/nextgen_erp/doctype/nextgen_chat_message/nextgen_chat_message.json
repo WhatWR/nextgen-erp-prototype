@@ -1,0 +1,23 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["session", "user", "role", "message_type", "turn_id", "content", "action", "page_context", "tool_summary"],
+ "fields": [
+  {"fieldname": "session", "fieldtype": "Link", "in_list_view": 1, "label": "Session", "options": "NextGen Chat Session", "reqd": 1},
+  {"fieldname": "user", "fieldtype": "Link", "label": "User", "options": "User", "reqd": 1},
+  {"fieldname": "role", "fieldtype": "Select", "in_list_view": 1, "label": "Role", "options": "user\nassistant\ntool\nsystem", "reqd": 1},
+  {"default": "text", "fieldname": "message_type", "fieldtype": "Select", "label": "Message Type", "options": "text\naction\nerror", "reqd": 1},
+  {"fieldname": "turn_id", "fieldtype": "Data", "in_list_view": 1, "label": "Turn ID"},
+  {"fieldname": "content", "fieldtype": "Long Text", "label": "Content", "reqd": 1},
+  {"fieldname": "action", "fieldtype": "Link", "label": "Action", "options": "NextGen Chat Action"},
+  {"fieldname": "page_context", "fieldtype": "JSON", "label": "Page Context"},
+  {"fieldname": "tool_summary", "fieldtype": "JSON", "label": "Tool Summary"}
+ ],
+ "module": "NextGen ERP",
+ "name": "NextGen Chat Message",
+ "permissions": [{"create": 1, "delete": 1, "read": 1, "role": "System Manager"}],
+ "sort_field": "creation",
+ "sort_order": "ASC"
+}

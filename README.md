@@ -18,6 +18,10 @@ them through a confidence-gated order-to-cash workflow.
   payment status, FAQ via RAG) and can re-send the invoice + PromptPay QR —
   through the same secured ERPNext methods only. See
   [docs/AI_ASSISTANT.md](docs/AI_ASSISTANT.md).
+- **Typhoon Staff Chat** is a Desk-wide sales copilot for authenticated staff.
+  It reads live ERP data and prepares confirmation cards; only ERPNext can
+  submit/reserve a high-confidence order. See
+  [docs/STAFF_CHAT.md](docs/STAFF_CHAT.md).
 
 High-confidence, exception-free intake is sent directly to the customer for
 confirmation. Low-confidence or exceptional intake waits for a human. Customer

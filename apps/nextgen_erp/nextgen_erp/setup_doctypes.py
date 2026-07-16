@@ -14,6 +14,11 @@ import json
 import frappe
 
 MODULE = "NextGen ERP"
+DESK_GROUP = "Next Gen ERP"
+COPILOT_WORKSPACE = "AI Sales Copilot"
+ORDER_INTAKE_SIDEBAR = "Order Intake Agent"
+COPILOT_ICON = "/assets/nextgen_erp/images/ai-sales-copilot.svg"
+ERP_ICON = "/assets/nextgen_erp/images/nextgen-erp-icon.svg"
 
 
 def run():
@@ -35,21 +40,23 @@ def run():
 
 
 def _desk_tile():
-    """Add an 'Order Agent' tile to the /desk launcher that opens the workspace.
+    """Create an Accounting-style Next Gen ERP group on the Desk launcher."""
+    for legacy in ("Order Agent", "NextGen Orders"):
+        if frappe.db.exists("Workspace", legacy):
+            frappe.delete_doc("Workspace", legacy, force=True, ignore_permissions=True)
 
-    The legacy /desk desktop shows Desktop Icons whose is_permitted() requires a
-    matching Workspace Sidebar (keyed by label). Create both.
-    """
-    if frappe.db.exists("Workspace Sidebar", "Order Agent"):
-        frappe.delete_doc("Workspace Sidebar", "Order Agent", force=True, ignore_permissions=True)
-    sidebar = frappe.get_doc(
+    for legacy in ("Order Agent", ORDER_INTAKE_SIDEBAR, COPILOT_WORKSPACE):
+        if frappe.db.exists("Workspace Sidebar", legacy):
+            frappe.delete_doc("Workspace Sidebar", legacy, force=True, ignore_permissions=True)
+
+    copilot_sidebar = frappe.get_doc(
         {
             "doctype": "Workspace Sidebar",
-            "title": "Order Agent",
+            "title": COPILOT_WORKSPACE,
             "module": MODULE,
-            "header_icon": "sell",
+            "header_icon": "bot-message-square",
             "items": [
-                {"type": "Link", "label": "Order Agent", "link_type": "Workspace", "link_to": "Order Agent", "icon": "sell", "idx": 1},
+                {"type": "Link", "label": COPILOT_WORKSPACE, "link_type": "Workspace", "link_to": COPILOT_WORKSPACE, "icon": "bot-message-square", "idx": 1},
                 {"type": "Link", "label": "AI Order Intake", "link_type": "DocType", "link_to": "AI Order Intake", "idx": 2},
                 {"type": "Link", "label": "LINE Customer Map", "link_type": "DocType", "link_to": "LINE Customer Map", "idx": 3},
                 {"type": "Link", "label": "LINE Channel Settings", "link_type": "DocType", "link_to": "LINE Channel Settings", "idx": 4},
@@ -60,25 +67,62 @@ def _desk_tile():
             ],
         }
     )
-    sidebar.flags.ignore_links = True
-    sidebar.insert(ignore_permissions=True)
+    copilot_sidebar.flags.ignore_links = True
+    copilot_sidebar.insert(ignore_permissions=True)
 
-    existing = frappe.db.get_value("Desktop Icon", {"label": "Order Agent"})
-    if existing:
-        frappe.delete_doc("Desktop Icon", existing, force=True, ignore_permissions=True)
+    # Drop the old group name so the launcher has one unambiguous entry.
+    if frappe.db.exists("Desktop Icon", COPILOT_WORKSPACE):
+        frappe.delete_doc("Desktop Icon", COPILOT_WORKSPACE, force=True, ignore_permissions=True)
+
+    if frappe.db.exists("Desktop Icon", DESK_GROUP):
+        group = frappe.get_doc("Desktop Icon", DESK_GROUP)
+    else:
+        group = frappe.new_doc("Desktop Icon")
+    group.update(
+        {
+            "label": DESK_GROUP,
+            "icon_type": "Folder",
+            "link_type": "Workspace Sidebar",
+            "app": "nextgen_erp",
+            "icon": "bot-message-square",
+            # A Folder must not have logo_url: Frappe otherwise skips the
+            # folder-icon layout class and its child thumbnail appears blank.
+            "logo_url": None,
+            "standard": 1,
+            "hidden": 0,
+            "idx": 0,
+        }
+    )
+    group.save(ignore_permissions=True)
+
+    app_icon_name = frappe.db.get_value("Desktop Icon", {"label": "NextGen ERP"})
+    if app_icon_name:
+        app_icon = frappe.get_doc("Desktop Icon", app_icon_name)
+        app_icon.parent_icon = None
+        app_icon.logo_url = ERP_ICON
+        app_icon.link = "/desk/ai-sales-copilot"
+        app_icon.hidden = 1
+        app_icon.save(ignore_permissions=True)
+
+    for legacy in ("Order Agent", ORDER_INTAKE_SIDEBAR, COPILOT_WORKSPACE):
+        existing = frappe.db.get_value("Desktop Icon", {"label": legacy})
+        if existing:
+            frappe.delete_doc("Desktop Icon", existing, force=True, ignore_permissions=True)
+
     icon = frappe.get_doc(
         {
             "doctype": "Desktop Icon",
-            "label": "Order Agent",
+            "label": COPILOT_WORKSPACE,
             "icon_type": "Link",
             "link_type": "Workspace Sidebar",
-            "link_to": "Order Agent",
-            "app": "erpnext",
-            "parent_icon": "ERPNext",
-            "icon": "sell",
-            "logo_url": ICON,
+            "link_to": COPILOT_WORKSPACE,
+            "app": "nextgen_erp",
+            "parent_icon": DESK_GROUP,
+            "icon": "bot-message-square",
+            "logo_url": COPILOT_ICON,
             "standard": 1,
             "hidden": 0,
+            "idx": 1,
         }
     )
     icon.flags.ignore_links = True
@@ -86,11 +130,13 @@ def _desk_tile():
 
     from frappe.desk.doctype.desktop_icon.desktop_icon import clear_desktop_icons_cache
 
-    clear_desktop_icons_cache("Administrator")
+    clear_desktop_icons_cache()
+    frappe.cache.delete_key("desktop_icons")
+    frappe.cache.delete_key("bootinfo")
 
 
 LOGO = "/assets/nextgen_erp/images/nextgen-logo.svg"
-ICON = "/assets/nextgen_erp/images/nextgen-icon.svg"
+ICON = ERP_ICON
 
 
 def _branding():
@@ -172,12 +218,12 @@ def _number_cards() -> dict:
 
 def _workspace(card_map: dict):
     # Force-recreate so re-runs pick up new cards/links (drop legacy + current name).
-    for legacy in ("Order Agent", "NextGen Orders"):
+    for legacy in ("Order Agent", "NextGen Orders", COPILOT_WORKSPACE):
         if frappe.db.exists("Workspace", legacy):
             frappe.delete_doc("Workspace", legacy, ignore_permissions=True, force=True)
     content = [
         {"id": "logo", "type": "paragraph", "data": {"text": '<img src="/assets/nextgen_erp/images/nextgen-logo.svg" alt="NextGen Order AI" style="height:44px">', "col": 12}},
-        {"id": "hdr", "type": "header", "data": {"text": '<span class="h4">Order Intake</span>', "col": 12}},
+        {"id": "hdr", "type": "header", "data": {"text": '<span class="h4">AI Sales Copilot</span>', "col": 12}},
         {"id": "sc1", "type": "shortcut", "data": {"shortcut_name": "Review Queue", "col": 3}},
         {"id": "sc2", "type": "shortcut", "data": {"shortcut_name": "LINE Channel Settings", "col": 3}},
         {"id": "sc3", "type": "shortcut", "data": {"shortcut_name": "Automation Settings", "col": 3}},
@@ -190,12 +236,12 @@ def _workspace(card_map: dict):
     frappe.get_doc(
         {
             "doctype": "Workspace",
-            "name": "Order Agent",
-            "title": "Order Agent",
-            "label": "Order Agent",
+            "name": COPILOT_WORKSPACE,
+            "title": COPILOT_WORKSPACE,
+            "label": COPILOT_WORKSPACE,
             "module": MODULE,
             "public": 1,
-            "icon": "sell",
+            "icon": "sparkles",
             "content": json.dumps(content),
             "number_cards": [{"number_card_name": name} for name in card_map.values()],
             "shortcuts": [

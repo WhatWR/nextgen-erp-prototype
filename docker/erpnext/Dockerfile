@@ -7,4 +7,6 @@ COPY --chown=frappe:frappe apps/nextgen_erp /home/frappe/frappe-bench/apps/nextg
 USER frappe
 WORKDIR /home/frappe/frappe-bench
 RUN ./env/bin/pip install --no-cache-dir --editable apps/nextgen_erp \
-    && bench build --app nextgen_erp
+    && bench build --app nextgen_erp \
+    && ln -sfn /home/frappe/frappe-bench/apps/nextgen_erp/nextgen_erp/public \
+        /home/frappe/frappe-bench/assets/nextgen_erp

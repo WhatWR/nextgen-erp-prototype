@@ -141,7 +141,11 @@ services:
         condition: service_started
       create-site:
         condition: service_completed_successfully
-    networks: [internal]
+    networks:
+      internal:
+        aliases:
+          # Realtime authenticates its session through the site origin URL.
+          - ${SITE_NAME:?Set SITE_NAME in .env.server}
 
   websocket:
     <<: *backend
@@ -185,6 +189,8 @@ services:
   gateway:
     image: caddy:2-alpine
     restart: unless-stopped
+    environment:
+      SITE_NAME: ${SITE_NAME:?Set SITE_NAME in .env.server}
     ports:
       - "127.0.0.1:${HTTP_PORT:-8180}:8080"
     volumes:

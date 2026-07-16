@@ -11,7 +11,7 @@ after_install = "nextgen_erp.install.after_install"
 after_migrate = ["nextgen_erp.install.after_migrate"]
 
 # Desk navbar / app-switcher logo for the AI order agent
-app_logo_url = "/assets/nextgen_erp/images/nextgen-icon.svg"
+app_logo_url = "/assets/nextgen_erp/images/nextgen-erp-icon.svg"
 
 # Apps
 # ------------------
@@ -33,8 +33,8 @@ app_logo_url = "/assets/nextgen_erp/images/nextgen-icon.svg"
 # ------------------
 
 # include js, css files in header of desk.html
-# app_include_css = "/assets/nextgen_erp/css/nextgen_erp.css"
-# app_include_js = "/assets/nextgen_erp/js/nextgen_erp.js"
+app_include_css = "/assets/nextgen_erp/css/staff_chat.css"
+app_include_js = "/assets/nextgen_erp/js/staff_chat.js"
 
 # include js, css files in header of web template
 # web_include_css = "/assets/nextgen_erp/css/nextgen_erp.css"
@@ -174,6 +174,9 @@ app_logo_url = "/assets/nextgen_erp/images/nextgen-icon.svg"
 # 		"nextgen_erp.tasks.monthly"
 # 	],
 # }
+scheduler_events = {
+	"daily": ["nextgen_erp.staff_chat.cleanup_expired_chat_data"],
+}
 
 # Testing
 # -------
@@ -284,12 +287,12 @@ override_whitelisted_methods = {
 # NextGen Automation Settings.external_service_url.
 
 
-# Register the AI order agent on the apps screen / switcher with its own logo
+# Register NextGen ERP as an app inside the AI Sales Copilot launcher group.
 add_to_apps_screen = [
 	{
 		"name": "nextgen_erp",
-		"logo": "/assets/nextgen_erp/images/nextgen-icon.svg",
-		"title": "NextGen Order AI",
-		"route": "/app/order-agent",
+		"logo": "/assets/nextgen_erp/images/nextgen-erp-icon.svg",
+		"title": "NextGen ERP",
+		"route": "/desk/ai-sales-copilot",
 	}
 ]

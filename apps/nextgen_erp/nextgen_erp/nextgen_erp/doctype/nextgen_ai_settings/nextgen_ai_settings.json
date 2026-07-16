@@ -4,14 +4,18 @@
  "engine": "InnoDB",
  "field_order": [
   "enabled",
+  "enable_staff_chat",
   "gateway_url",
   "api_key",
   "column_break_models",
   "chat_model",
+  "staff_chat_model",
   "embeddings_model",
   "section_limits",
   "max_tool_calls",
-  "daily_message_cap"
+  "daily_message_cap",
+  "staff_chat_daily_turn_cap",
+  "chat_history_retention_days"
  ],
  "fields": [
   {
@@ -22,7 +26,14 @@
    "label": "Enable LINE AI Assistant"
   },
   {
-   "description": "Base URL of an OpenAI-compatible endpoint, e.g. https://api.example.com (the service calls /v1/chat/completions and /v1/embeddings)",
+   "default": "0",
+   "description": "Enable the Typhoon-powered assistant for authenticated ERPNext staff.",
+   "fieldname": "enable_staff_chat",
+   "fieldtype": "Check",
+   "label": "Enable Staff Chat"
+  },
+  {
+   "description": "OpenAI-compatible base URL. Typhoon accepts https://api.opentyphoon.ai or https://api.opentyphoon.ai/v1.",
    "fieldname": "gateway_url",
    "fieldtype": "Data",
    "label": "AI Gateway URL"
@@ -40,6 +51,13 @@
    "fieldname": "chat_model",
    "fieldtype": "Data",
    "label": "Chat Model"
+  },
+  {
+   "default": "typhoon-v2.5-30b-a3b-instruct",
+   "description": "Typhoon model used by the ERPNext staff assistant. Falls back to Chat Model when blank.",
+   "fieldname": "staff_chat_model",
+   "fieldtype": "Data",
+   "label": "Staff Chat Model"
   },
   {
    "description": "Optional. When empty, knowledge search falls back to keyword matching.",
@@ -65,6 +83,20 @@
    "fieldname": "daily_message_cap",
    "fieldtype": "Int",
    "label": "Daily Answer Cap"
+  },
+  {
+   "default": "200",
+   "description": "Maximum staff chat turns per day across the site (0 disables the cap).",
+   "fieldname": "staff_chat_daily_turn_cap",
+   "fieldtype": "Int",
+   "label": "Staff Chat Daily Turn Cap"
+  },
+  {
+   "default": "30",
+   "description": "Automatically remove staff chat sessions older than this many days (0 keeps them indefinitely).",
+   "fieldname": "chat_history_retention_days",
+   "fieldtype": "Int",
+   "label": "Chat History Retention (Days)"
   }
  ],
  "issingle": 1,

@@ -27,6 +27,12 @@ class AIError(RuntimeError):
 Transport = Callable[[str, str, dict[str, str], "bytes | None"], "tuple[int, bytes]"]
 
 
+def normalize_gateway_url(value: str) -> str:
+	"""Accept both a provider host and its OpenAI-style ``/v1`` base URL."""
+	base = (value or "").strip().rstrip("/")
+	return base[:-3] if base.endswith("/v1") else base
+
+
 def _urllib_transport(
     url: str, method: str, headers: dict[str, str], body: bytes | None
 ) -> tuple[int, bytes]:
@@ -46,7 +52,7 @@ class AIClient:
         *,
         transport: Transport | None = None,
     ) -> None:
-        self.base_url = (base_url or os.environ.get("AI_GATEWAY_URL", "")).rstrip("/")
+        self.base_url = normalize_gateway_url(base_url or os.environ.get("AI_GATEWAY_URL", ""))
         self.api_key = api_key if api_key is not None else os.environ.get("AI_GATEWAY_API_KEY", "")
         self._transport = transport or _urllib_transport
 
