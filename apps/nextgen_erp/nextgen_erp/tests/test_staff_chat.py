@@ -104,8 +104,10 @@ class IntegrationTestStaffChatActions(IntegrationTestCase):
 	def test_tool_registry_has_no_accounting_or_delete_actions(self):
 		names = {tool["function"]["name"] for tool in staff_chat.TOOLS}
 		self.assertIn("prepare_sales_order", names)
+		self.assertIn("list_items_with_price_and_stock", names)
 		self.assertFalse(any("delete" in name or "payment" in name or "invoice" in name for name in names))
 		self.assertIn("ห้ามแต่งเลขเอกสาร", staff_chat.SYSTEM_PROMPT)
+		self.assertIn("ห้ามถามกลับให้ระบุชื่อ", staff_chat.SYSTEM_PROMPT)
 		self.assertIn("ยังไม่ได้สร้าง Sales Order", staff_chat.ACTION_PREVIEW_TEXT)
 
 	def test_item_snapshot_without_customer_uses_selling_price_list(self):
@@ -113,6 +115,15 @@ class IntegrationTestStaffChatActions(IntegrationTestCase):
 		self.assertNotIn("error", snapshot)
 		self.assertEqual(snapshot["price_list"], "Standard Selling")
 		self.assertGreater(snapshot["rate"], 0)
+
+	def test_generic_catalog_question_returns_live_price_and_stock(self):
+		catalog = staff_chat._list_items_with_price_and_stock()
+		self.assertEqual(catalog["source"], "ERPNext Item + Item Price + Bin")
+		answer = staff_chat._direct_sales_catalog_answer("สินค้ามีอะไรบ้าง")
+		self.assertIn("M-150", answer)
+		self.assertIn("บาท/ลัง", answer)
+		self.assertIn("สต๊อก", answer)
+		self.assertIsNone(staff_chat._direct_sales_catalog_answer("สร้าง Sales Order"))
 
 	def test_prepare_sales_order_result_is_json_serializable(self):
 		session = self._session()

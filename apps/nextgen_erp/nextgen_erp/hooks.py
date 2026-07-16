@@ -36,6 +36,15 @@ app_logo_url = "/assets/nextgen_erp/images/nextgen-erp-icon.svg"
 app_include_css = "/assets/nextgen_erp/css/staff_chat.css"
 app_include_js = "/assets/nextgen_erp/js/staff_chat.js"
 
+# Manual, snapshot-only forecast controls in Desk. Buying documents still go
+# through the chat preview and explicit confirmation boundary.
+doctype_list_js = {
+	"NextGen Procurement Forecast": "public/js/procurement_forecast_controls.js",
+}
+doctype_js = {
+	"NextGen Procurement Forecast": "public/js/nextgen_procurement_forecast.js",
+}
+
 # include js, css files in header of web template
 # web_include_css = "/assets/nextgen_erp/css/nextgen_erp.css"
 # web_include_js = "/assets/nextgen_erp/js/nextgen_erp.js"

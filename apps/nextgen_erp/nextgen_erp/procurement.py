@@ -520,8 +520,16 @@ def _summarize_risk(limit: int, horizon_days: int | None) -> dict:
 		as_dict=True,
 	)
 	summaries = []
+	forecast_cards = []
 	for row in rows:
 		result = forecast.forecast_item(row.item_code, None, horizon_days, settings)
+		forecast_cards.append(
+			{
+				key: value
+				for key, value in result.items()
+				if key not in {"recent_purchase_lots", "open_purchase_orders", "assumptions"}
+			}
+		)
 		summaries.append(
 			{
 				"item_code": result["item_code"],
@@ -544,6 +552,9 @@ def _summarize_risk(limit: int, horizon_days: int | None) -> dict:
 		"horizon_days": cint(horizon_days) or settings["horizon_days"],
 		"history_window_days": settings["history_window_days"],
 		"items": summaries,
+		# Staff Chat consumes and removes this UI-only payload before sending the
+		# bounded tool result back to Typhoon.
+		"forecast_cards": forecast_cards[:5],
 		"fast_moving": [s["item_code"] for s in summaries if s["movement_class"] == "fast-moving"],
 		"slow_moving": [s["item_code"] for s in summaries if s["movement_class"] == "slow-moving"],
 	}

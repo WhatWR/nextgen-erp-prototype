@@ -466,6 +466,9 @@
 		]
 			.map(([label, value]) => `<div class="ng-forecast-metric"><small>${label}</small><span>${value}</span></div>`)
 			.join("");
+		const itemCode = escapeHtml(forecast.item_code || "");
+		const qty = num(forecast.suggested_qty);
+		const uom = escapeHtml(forecast.stock_uom || "");
 		return `<section class="ng-forecast-card">
 			<div class="ng-forecast-title">
 				<strong>Forecast: ${escapeHtml(forecast.item_name || forecast.item_code)}</strong>
@@ -475,7 +478,33 @@
 			<div class="ng-forecast-grid">${rows}</div>
 			${warnings ? `<ul class="ng-action-warnings">${warnings}</ul>` : ""}
 			<div class="ng-forecast-footer">${escapeHtml(forecast.formula_version || "")}</div>
+			<div class="ng-message-actions">
+				<button data-generate-forecast="${itemCode}">บันทึก Forecast</button>
+				<button data-chat-prompt="สร้าง Purchase Order Preview สำหรับ ${itemCode} จำนวน ${qty} ${uom} จาก Forecast ล่าสุด">สร้าง PO Preview</button>
+				<button data-chat-prompt="สร้าง Material Request Preview สำหรับ ${itemCode} จำนวน ${qty} ${uom} จาก Forecast ล่าสุด">สร้าง MR Preview</button>
+			</div>
 		</section>`;
+	}
+
+	function contextualActions(message, index) {
+		if (
+			message.role !== "assistant"
+			|| message.pending
+			|| message.error
+			|| message.action
+			|| (message.forecasts || []).length
+			|| index === 0
+		) return "";
+		if (state.agentKey === "procurement") {
+			return `<div class="ng-message-actions ng-inline-actions">
+				<button data-generate-forecast="">Generate Forecast</button>
+				<button data-chat-prompt="สร้าง Purchase Order Preview จากคำแนะนำล่าสุด โดยใช้ข้อมูล ERP ปัจจุบัน">สร้าง PO Preview</button>
+				<button data-chat-prompt="สร้าง Material Request Preview จากคำแนะนำล่าสุด โดยใช้ข้อมูล ERP ปัจจุบัน">สร้าง MR Preview</button>
+			</div>`;
+		}
+		return `<div class="ng-message-actions ng-inline-actions">
+			<button data-chat-prompt="สร้าง Sales Order Preview จากข้อมูลล่าสุด โดยตรวจราคาและสต๊อกจาก ERP อีกครั้ง">สร้าง Sales Order Preview</button>
+		</div>`;
 	}
 
 	function procurementActionCard(action) {
@@ -580,10 +609,12 @@
 					.join("");
 				const forecasts = (message.forecasts || []).map(forecastCard).join("");
 				const documentLink = message.href ? ` <button class="ng-doc-link" data-document-type="${escapeHtml(message.documentType)}" data-document-name="${escapeHtml(message.documentName)}">เปิดเอกสาร</button>` : "";
+				const contextual = contextualActions(message, index);
 				return `<div class="ng-message ng-${message.role} ${message.error ? "ng-error" : ""}" data-index="${index}">
 					<div class="ng-bubble">${message.pending && !message.content ? '<span class="ng-thinking">กำลังคิด</span>' : renderText(message.content)}${documentLink}</div>
 					${forecasts}
 					${message.action ? actionCard(message.action) : ""}
+					${contextual}
 					${suggestions ? `<div class="ng-suggestions">${suggestions}</div>` : ""}
 					${agentChoices ? `<div class="ng-suggestions ng-agent-choices">${agentChoices}</div>` : ""}
 					${message.error ? '<button data-retry="1" class="ng-retry">ลองอีกครั้ง</button>' : ""}
@@ -598,6 +629,10 @@
 		if (choose) return selectAgent(choose.dataset.chooseAgent);
 		const suggestion = event.target.closest("[data-suggestion]");
 		if (suggestion) return send(suggestion.dataset.suggestion);
+		const prompt = event.target.closest("[data-chat-prompt]");
+		if (prompt) return send(prompt.dataset.chatPrompt);
+		const generate = event.target.closest("[data-generate-forecast]");
+		if (generate) return openForecastDialog(generate.dataset.generateForecast);
 		if (event.target.closest("[data-retry]")) return send(state.lastInput);
 		const confirm = event.target.closest("[data-confirm-action]");
 		if (confirm) return confirmAction(confirm.dataset.confirmAction);
@@ -607,6 +642,65 @@
 		if (cancel) return cancelAction(cancel.dataset.cancelAction);
 		const link = event.target.closest("[data-document-type]");
 		if (link) frappe.set_route("Form", link.dataset.documentType, link.dataset.documentName);
+	}
+
+	function openForecastDialog(itemCode = "") {
+		const dialog = new frappe.ui.Dialog({
+			title: "Generate Procurement Forecast",
+			fields: [
+				{
+					fieldname: "item",
+					fieldtype: "Link",
+					options: "Item",
+					label: "สินค้า (เว้นว่างเพื่อสร้างทุกสินค้า)",
+					default: itemCode || "",
+					get_query: () => ({ filters: { disabled: 0, is_stock_item: 1, is_purchase_item: 1 } }),
+				},
+				{
+					fieldname: "warehouse",
+					fieldtype: "Link",
+					options: "Warehouse",
+					label: "คลัง (เว้นว่างเพื่อใช้คลังซื้อเริ่มต้น)",
+					get_query: () => ({ filters: { disabled: 0, is_group: 0 } }),
+				},
+				{ fieldname: "horizon_days", fieldtype: "Int", label: "Horizon (Days)", default: 30, reqd: 1 },
+				{ fieldname: "limit", fieldtype: "Int", label: "จำนวนสินค้าสูงสุด", default: itemCode ? 1 : 50 },
+			],
+			primary_action_label: "Generate Forecast",
+			primary_action: async (values) => {
+				const button = dialog.get_primary_btn();
+				button.prop("disabled", true);
+				try {
+					const response = await frappe.call({
+						method: "nextgen_erp.forecast.generate_forecasts",
+						args: {
+							item_codes: values.item ? JSON.stringify([values.item]) : null,
+							warehouse: values.warehouse || null,
+							horizon_days: values.horizon_days,
+							limit: values.item ? 1 : values.limit,
+						},
+						freeze: true,
+						freeze_message: "กำลังคำนวณ Forecast จากข้อมูล ERP...",
+					});
+					const result = response.message || {};
+					dialog.hide();
+					state.messages.push({
+						role: "assistant",
+						content: `สร้าง Forecast Snapshot แล้ว ${result.generated || 0} รายการ${result.failed ? ` · ไม่สำเร็จ ${result.failed}` : ""} โดยยังไม่ได้สร้าง PO หรือ Material Request`,
+					});
+					frappe.show_alert({
+						message: `Generated ${result.generated || 0} forecast(s)`,
+						indicator: result.failed ? "orange" : "green",
+					});
+					render();
+				} catch (error) {
+					frappe.msgprint(error?.message || "สร้าง Forecast ไม่สำเร็จ");
+				} finally {
+					button.prop("disabled", false);
+				}
+			},
+		});
+		dialog.show();
 	}
 
 	function editAction(actionId) {

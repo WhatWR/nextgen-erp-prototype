@@ -66,6 +66,24 @@ class IntegrationTestProcurementCopilot(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			snapshot.save(ignore_permissions=True)
 
+	def test_manual_forecast_button_creates_snapshot_only(self):
+		po_before = frappe.db.count("Purchase Order")
+		mr_before = frappe.db.count("Material Request")
+		result = forecast.generate_forecasts(item_codes=["DRK-M150"], horizon_days=30, limit=1)
+		self.assertEqual(result["generated"], 1)
+		self.assertEqual(result["failed"], 0)
+		self.assertTrue(
+			frappe.db.exists("NextGen Procurement Forecast", result["forecasts"][0]["snapshot"])
+		)
+		self.assertEqual(frappe.db.count("Purchase Order"), po_before)
+		self.assertEqual(frappe.db.count("Material Request"), mr_before)
+
+	def test_risk_summary_exposes_bounded_forecast_cards_for_chat(self):
+		result = procurement._summarize_risk(limit=10, horizon_days=30)
+		self.assertLessEqual(len(result["forecast_cards"]), 5)
+		if result["items"]:
+			self.assertEqual(result["forecast_cards"][0]["formula_version"], forecast.FORMULA_VERSION)
+
 	# ------------------------------------------------------------------
 	# Purchase actions
 	# ------------------------------------------------------------------

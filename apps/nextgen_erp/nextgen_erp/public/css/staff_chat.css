@@ -149,6 +149,19 @@
 .ng-forecast-metric small { display: block; color: var(--text-muted, #64748b); font-size: 11px; }
 .ng-forecast-metric span { font-size: 13px; }
 .ng-forecast-footer { margin-top: 8px; color: var(--text-muted, #94a3b8); font-size: 10px; }
+.ng-message-actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.ng-message-actions button {
+	border: 1px solid var(--ng-agent-color, #0e9f6e);
+	border-radius: 8px;
+	padding: 6px 8px;
+	background: color-mix(in srgb, var(--ng-agent-color, #0e9f6e) 8%, transparent);
+	color: var(--ng-agent-color, #0e9f6e);
+	font-size: 11px;
+	font-weight: 600;
+	cursor: pointer;
+}
+.ng-message-actions button:first-child { background: var(--ng-agent-color, #0e9f6e); color: #fff; }
+.ng-inline-actions { max-width: 94%; }
 .ng-risk { padding: 2px 8px; border-radius: 999px; font-size: 11px; }
 .ng-risk-high { background: #fee2e2; color: #b91c1c; }
 .ng-risk-medium { background: #fef3c7; color: #b45309; }

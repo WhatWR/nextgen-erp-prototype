@@ -549,6 +549,88 @@ def forecast_item(
 	return result
 
 
+def _require_forecast_role() -> None:
+	"""Allow operational users to create derived snapshots, never buying documents."""
+	user = frappe.session.user
+	allowed = {"System Manager", "Purchase Manager", "Purchase User", "Stock Manager"}
+	if user != "Administrator" and not allowed.intersection(frappe.get_roles(user)):
+		frappe.throw(
+			frappe._("You do not have permission to generate procurement forecasts"),
+			frappe.PermissionError,
+		)
+
+
+@frappe.whitelist()
+def generate_forecasts(
+	item_codes: str | list[str] | None = None,
+	warehouse: str | None = None,
+	horizon_days: int | None = None,
+	limit: int = 50,
+) -> dict[str, Any]:
+	"""Generate immutable forecast snapshots from live ERP data only.
+
+	This manual endpoint deliberately does not create recommendations, Material
+	Requests, Purchase Orders, or any submitted document. Those remain behind the
+	chat preview/confirmation workflow.
+	"""
+	_require_forecast_role()
+	settings = get_settings()
+	if not settings["enabled"]:
+		frappe.throw(frappe._("Enable the Procurement Copilot first"))
+
+	if isinstance(item_codes, str):
+		try:
+			parsed = json.loads(item_codes)
+		except (TypeError, json.JSONDecodeError):
+			parsed = [part.strip() for part in item_codes.split(",") if part.strip()]
+		item_codes = parsed if isinstance(parsed, list) else [parsed]
+	item_codes = list(dict.fromkeys(str(item).strip() for item in (item_codes or []) if str(item).strip()))
+	limit = min(max(cint(limit or 50), 1), 100)
+	if not item_codes:
+		item_codes = candidate_items(settings, limit=limit)
+	else:
+		item_codes = item_codes[:limit]
+
+	warehouse = (warehouse or "").strip() or default_buying_warehouse()
+	if warehouse and not frappe.db.exists(
+		"Warehouse", {"name": warehouse, "is_group": 0, "disabled": 0}
+	):
+		frappe.throw(frappe._("Select an active, non-group Warehouse"))
+
+	generated: list[dict[str, Any]] = []
+	failed: list[dict[str, str]] = []
+	for item_code in item_codes:
+		if not frappe.db.exists(
+			"Item", {"name": item_code, "disabled": 0, "is_stock_item": 1, "is_purchase_item": 1}
+		):
+			failed.append({"item_code": item_code, "error": "Item is not an active stock purchase item"})
+			continue
+		try:
+			result = forecast_item(item_code, warehouse, horizon_days, settings, save_snapshot=True)
+			generated.append(
+				{
+					"item_code": item_code,
+					"snapshot": result["snapshot"],
+					"suggested_qty": result["suggested_qty"],
+					"stockout_risk": result["stockout_risk"],
+				}
+			)
+		except Exception as exc:
+			frappe.log_error(
+				title=f"Manual procurement forecast {item_code}", message=frappe.get_traceback()
+			)
+			failed.append({"item_code": item_code, "error": str(exc)[:240]})
+
+	return {
+		"generated": len(generated),
+		"failed": len(failed),
+		"forecasts": generated,
+		"errors": failed,
+		"warehouse": warehouse,
+		"horizon_days": cint(horizon_days) or settings["horizon_days"],
+	}
+
+
 def store_snapshot(result: dict) -> str:
 	"""Persist an immutable forecast snapshot and return its name."""
 	company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(

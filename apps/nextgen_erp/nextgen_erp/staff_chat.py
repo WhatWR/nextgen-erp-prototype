@@ -44,6 +44,7 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยพนักงาน�
 6. ผลจาก prepare_sales_order เป็นเพียง Action Preview ที่รอพนักงานกดยืนยัน ห้ามบอกว่าสร้าง Sales Order แล้ว ห้ามแต่งเลขเอกสารหรือวันจัดส่ง และห้ามอ้างว่าดำเนินการสำเร็จ
 7. ระบุรหัสเอกสารได้เฉพาะเมื่อ tool result ส่งรหัสนั้นมาอย่างชัดเจน หากไม่มีให้บอกว่าเป็น preview เท่านั้น
 8. ตอบสั้นและชัดเจน
+9. เมื่อผู้ใช้ถามว่ามีสินค้าอะไรบ้าง/ขอรายการสินค้า ให้ใช้ list_items_with_price_and_stock ทันที ห้ามถามกลับให้ระบุชื่อหรือรหัสสินค้าก่อน
 """
 
 
@@ -70,6 +71,21 @@ TOOLS: list[dict[str, Any]] = [
 				"type": "object",
 				"properties": {"query": {"type": "string"}, "limit": {"type": "integer"}},
 				"required": ["query"],
+				"additionalProperties": False,
+			},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "list_items_with_price_and_stock",
+			"description": "แสดงรายการสินค้าที่ขายได้ พร้อมราคาขายและ projected stock ล่าสุด ใช้เมื่อถามว่ามีสินค้าอะไรบ้าง",
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"limit": {"type": "integer"},
+					"warehouse": {"type": "string"},
+				},
 				"additionalProperties": False,
 			},
 		},
@@ -173,6 +189,11 @@ TOOLS: list[dict[str, Any]] = [
 ]
 
 TOOL_NAMES = {tool["function"]["name"] for tool in TOOLS}
+
+_GENERIC_CATALOG_RE = re.compile(
+	r"(สินค้ามีอะไร|มีสินค้าอะไร|รายการสินค้า|ขายอะไร(?:บ้าง)?|what\s+(?:products|items)|list\s+(?:products|items))",
+	re.IGNORECASE,
+)
 
 
 def _extract_tool_calls(response: dict, tool_names: set[str] | None = None) -> list[dict]:
@@ -598,6 +619,31 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 			limit=MAX_HISTORY,
 		)
 		history.reverse()
+		latest_user_text = next(
+			(str(row.content or "") for row in reversed(history) if row.role == "user"), ""
+		)
+		direct_text = (
+			_direct_sales_catalog_answer(latest_user_text) if agent.key == "sales" else None
+		)
+		if direct_text:
+			_publish(user, turn_id, "tool", name="list_items_with_price_and_stock")
+			_publish(user, turn_id, "delta", text=direct_text)
+			_save_message(
+				session_id,
+				user,
+				"assistant",
+				direct_text,
+				turn_id=turn_id,
+				agent_type=agent.key,
+				tool_summary={
+					"tools": ["list_items_with_price_and_stock"],
+					"latency_ms": round((time.monotonic() - started_at) * 1000),
+					"usage": {},
+				},
+			)
+			frappe.db.commit()
+			_publish(user, turn_id, "done", session_id=session_id)
+			return
 		context_note = json.dumps(page_context or {}, ensure_ascii=False)
 		messages: list[dict[str, Any]] = [
 			{"role": "system", "content": f"{agent.system_prompt}\nบริบทหน้า ERP ปัจจุบัน: {context_note}"}
@@ -632,6 +678,7 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 				# The agent registry enforces the per-agent tool allowlist.
 				result = agent.dispatch(name, arguments, user=user, session_id=session_id)
 				tool_log.append(name)
+				forecast_cards = result.pop("forecast_cards", [])
 				if result.get("action_id"):
 					action_ids.append(result["action_id"])
 					_publish(
@@ -642,6 +689,9 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 					)
 				if result.get("forecast_card"):
 					card = {key: value for key, value in result.items() if key != "forecast_card"}
+					forecasts.append(card)
+					_publish(user, turn_id, "forecast", forecast=card)
+				for card in forecast_cards:
 					forecasts.append(card)
 					_publish(user, turn_id, "forecast", forecast=card)
 				_publish(user, turn_id, "tool", name=name)
@@ -810,11 +860,78 @@ def _item_snapshot(item_code: str, customer: str | None = None, warehouse: str |
 	}
 
 
+def _list_items_with_price_and_stock(limit: int = 8, warehouse: str | None = None) -> dict:
+	"""Return the canonical ERP catalog used by LINE and Order Intake too."""
+	from nextgen_erp.api import get_catalog
+
+	limit = min(max(cint(limit or 8), 1), 10)
+	page = get_catalog(
+		warehouse=warehouse,
+		limit_start=0,
+		limit=1000,
+	)
+	rows = sorted(
+		page.get("data") or [],
+		key=lambda row: (
+			row.get("projected_qty") is None,
+			-flt(row.get("projected_qty")),
+			str(row.get("item_code") or ""),
+		),
+	)[:limit]
+	return {
+		"items": [
+			{
+				"item_code": row.get("item_code"),
+				"item_name": row.get("item_name"),
+				"uom": row.get("stock_uom"),
+				"warehouse": row.get("warehouse"),
+				"rate": flt(row.get("price")),
+				"currency": "THB",
+				"projected_qty": flt(row.get("projected_qty")),
+			}
+			for row in rows
+		],
+		"limit": limit,
+		"total": len(page.get("data") or []),
+		"source": "ERPNext Item + Item Price + Bin",
+	}
+
+
+def _direct_sales_catalog_answer(text: str) -> str | None:
+	"""Keep generic catalog questions deterministic instead of model-dependent."""
+	if not _GENERIC_CATALOG_RE.search(text or ""):
+		return None
+	result = _list_items_with_price_and_stock()
+	items = [item for item in result["items"] if not item.get("error")]
+	if not items:
+		return "ยังไม่มีสินค้าที่ขายได้ใน ERP หรือคุณยังไม่มีสิทธิ์อ่านรายการสินค้าค่ะ"
+	lines = []
+	for item in items:
+		label = item.get("item_name") or item.get("item_code")
+		code = item.get("item_code") or ""
+		if code and code.casefold() not in str(label).casefold():
+			label = f"{label} ({code})"
+		uom = item.get("uom") or "หน่วย"
+		detail = f"{flt(item.get('rate')):,.2f} บาท/{uom}"
+		detail += f" · สต๊อก {flt(item.get('projected_qty')):g} {uom}"
+		lines.append(f"• {label} — {detail}")
+	warehouse = items[0].get("warehouse")
+	header = "รายการสินค้าที่ขายได้จาก ERP ล่าสุด"
+	if warehouse:
+		header += f" (คลัง {warehouse})"
+	return header + "ค่ะ\n" + "\n".join(lines)
+
+
 def _dispatch_tool(name: str, arguments: dict, *, user: str, session_id: str):
 	if name == "search_customers":
 		return {"customers": _search_customers(str(arguments.get("query") or ""), arguments.get("limit") or 5)}
 	if name == "search_items":
 		return {"items": _search_items(str(arguments.get("query") or ""), arguments.get("limit") or 5)}
+	if name == "list_items_with_price_and_stock":
+		return _list_items_with_price_and_stock(
+			arguments.get("limit") or 8,
+			str(arguments.get("warehouse") or "") or None,
+		)
 	if name == "get_item_price_and_stock":
 		return _item_snapshot(
 			str(arguments.get("item_code") or ""),

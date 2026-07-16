@@ -962,7 +962,10 @@ def approve_payment_slip(name: str, reference_no: str):
 @frappe.whitelist()
 def get_catalog(warehouse: str | None = None, price_list: str | None = None, limit_start: int = 0, limit: int = 500):
     """Return a page of sellable catalog data in three database reads."""
-    _require_service_role()
+    # This is the single catalog read boundary for the external LINE service,
+    # Staff Chat and Order Intake. All callers see the same Item, Item Price
+    # and Bin data; no assistant owns a separate product catalog.
+    _require_operations_role()
     warehouse = (warehouse or "").strip() or None
     if warehouse and not frappe.db.exists(
         "Warehouse", {"name": warehouse, "is_group": 0, "disabled": 0}
@@ -1033,7 +1036,7 @@ def get_catalog(warehouse: str | None = None, price_list: str | None = None, lim
 
 @frappe.whitelist()
 def get_projected_qty(item_code: str, warehouse: str):
-    _require_service_role()
+    _require_operations_role()
     return {
         "item_code": item_code,
         "warehouse": warehouse,
@@ -1045,7 +1048,7 @@ def get_projected_qty(item_code: str, warehouse: str):
 
 @frappe.whitelist()
 def get_item_price(item_code: str, customer: str | None = None, price_list: str | None = None):
-    _require_service_role()
+    _require_operations_role()
     if not customer and not price_list:
         frappe.throw(_("customer or price_list is required"))
     rate = _selling_rate(item_code, customer, price_list) if customer else flt(

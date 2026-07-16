@@ -142,6 +142,7 @@ def build_tools(ctx: ToolContext) -> dict[str, ToolSpec]:
             ],
             "catalog_count": len(rows),
             "query": cleaned_query,
+            "source": "ERPNext Item + Item Price + Bin",
         }
 
     def search_knowledge(question: str = "") -> dict[str, Any]:
