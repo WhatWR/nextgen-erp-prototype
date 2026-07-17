@@ -11,6 +11,7 @@ from typing import Iterable
 
 THAI_DIGITS = str.maketrans("๐๑๒๓๔๕๖๗๘๙", "0123456789")
 UNIT_ALIASES = {
+    "แพ็ก": "แพ็ก",
     "แพ๊ค": "แพ็ก",
     "แพค": "แพ็ก",
     "pack": "แพ็ก",
@@ -21,6 +22,22 @@ UNIT_ALIASES = {
     "ถุง": "ถุง",
     "กระสอบ": "กระสอบ",
     "โหล": "โหล",
+    "ก้อน": "ก้อน",
+    "คิว": "คิว",
+    "เส้น": "เส้น",
+    "ถัง": "ถัง",
+    "แผ่น": "แผ่น",
+    "เมตร": "เมตร",
+    "กิโลกรัม": "กิโลกรัม",
+    "กก": "กิโลกรัม",
+    "ชุด": "ชุด",
+    "ม้วน": "ม้วน",
+    "คู่": "คู่",
+    "ห่อ": "ห่อ",
+    "กระป๋อง": "กระป๋อง",
+    "พาเลท": "พาเลท",
+    "ตัน": "ตัน",
+    "nos": "Nos",
 }
 FILLER_WORDS = (
     "พี่เอา",
@@ -38,8 +55,11 @@ FILLER_WORDS = (
     "วันนี้",
     "เหมือนเดิม",
 )
+_UNIT_PATTERN = "|".join(
+    re.escape(unit) for unit in sorted(UNIT_ALIASES, key=len, reverse=True)
+)
 NUMBER_UNIT_RE = re.compile(
-    r"(?P<qty>\d+(?:\.\d+)?)\s*(?P<uom>ลัง|แพ็ก|แพ๊ค|แพค|pack|กล่อง|ขวด|ชิ้น|ถุง|กระสอบ|โหล)?",
+    fr"(?P<qty>\d+(?:\.\d+)?)\s*(?P<uom>{_UNIT_PATTERN})?",
     re.IGNORECASE,
 )
 
@@ -105,7 +125,14 @@ def _candidate_score(segment: str, product: ProductCandidate) -> tuple[float, st
                 reduced = reduced.replace(filler, " ")
             reduced = NUMBER_UNIT_RE.sub(" ", reduced)
             reduced = re.sub(r"\s+", " ", reduced).strip()
-            score = SequenceMatcher(None, reduced, term).ratio()
+            # Customers naturally shorten long ERP names (for example
+            # "อิฐบล็อก" for "อิฐบล็อกมาตรฐาน 7 ซม."). Treat a meaningful
+            # contained phrase as a strong match; the runner-up ambiguity gate
+            # below still prevents choosing between similar products silently.
+            if len(reduced) >= 4 and reduced in term:
+                score = min(0.92, 0.84 + len(reduced) / 100)
+            else:
+                score = SequenceMatcher(None, reduced, term).ratio()
         if score > best_score:
             best_score, best_term = score, term
     return best_score, best_term

@@ -275,7 +275,15 @@ WORKFLOW_CATALOG = {
             "price": 390,
             "projected_qty": 20,
             "aliases": ["M-150", "เอ็ม150", "เอ็มร้อยห้าสิบ"],
-        }
+		},
+		{
+			"item_code": "DEMO-BLK-STD",
+			"item_name": "อิฐบล็อกมาตรฐาน 7 ซม.",
+			"stock_uom": "ก้อน",
+			"price": 9.5,
+			"projected_qty": 9000,
+			"aliases": [],
+		},
     ],
     "has_more": False,
     "next_start": 1,
@@ -365,6 +373,28 @@ class LineRoutingTest(unittest.TestCase):
         workflow.handle_event(line_id="U123", text="M-150 2 ลัง", event_id="evt-o2")
         create = [c for c in client.calls if c[0] == "nextgen_erp.api.create_ai_order_intake"][0]
         self.assertEqual(create[1]["payload"]["items"][0]["item_code"], "DRK-M150")
+
+    def test_building_material_short_name_and_piece_uom_create_intake(self):
+        client = self._workflow_client(
+            {
+                "nextgen_erp.api.create_ai_order_intake": [
+                    {"name": "AIO-BLOCK", "created": True, "status": "Awaiting Customer"}
+                ]
+            }
+        )
+        assistant = RecordingAssistant()
+        workflow = ERPNextLineWorkflow(client, warehouse="Stores - NG", assistant=assistant)
+        result = workflow.handle_event(
+            line_id="U123", text="อิฐบล็อก 200 ก้อน", event_id="evt-block"
+        )
+        self.assertEqual(result["kind"], "order_intake")
+        self.assertEqual(result["name"], "AIO-BLOCK")
+        self.assertEqual(assistant.answered, [])
+        create = [c for c in client.calls if c[0] == "nextgen_erp.api.create_ai_order_intake"][0]
+        item = create[1]["payload"]["items"][0]
+        self.assertEqual(item["item_code"], "DEMO-BLK-STD")
+        self.assertEqual(item["qty"], 200.0)
+        self.assertEqual(item["uom"], "ก้อน")
 
     def test_unknown_product_order_still_creates_a_review_intake(self):
         client = self._workflow_client(
