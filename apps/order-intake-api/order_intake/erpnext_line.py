@@ -35,6 +35,7 @@ class ERPNextLineWorkflow:
         line_id: str,
         text: str,
         event_id: str,
+        display_name: str | None = None,
     ) -> dict[str, Any]:
         if not self.client.configured:
             raise ERPNextError("ERPNext credentials are required for LINE order intake")
@@ -48,11 +49,15 @@ class ERPNextLineWorkflow:
         if isinstance(reply, dict) and reply.get("handled"):
             return {"kind": "customer_reply", **reply}
 
+        is_question = looks_like_question(text)
         mapping = self.client.call_method(
-            "nextgen_erp.api.resolve_line_customer", line_id=line_id
+            "nextgen_erp.api.resolve_line_customer",
+            line_id=line_id,
+            create_if_missing=0 if is_question else 1,
+            display_name=display_name,
         )
         customer = mapping.get("customer") if isinstance(mapping, dict) else None
-        if looks_like_question(text):
+        if is_question:
             # No explicit quantity+unit — a question or chitchat, never an
             # order (a product name alone must not create an intake). Only
             # order-shaped messages continue to the intake path below.

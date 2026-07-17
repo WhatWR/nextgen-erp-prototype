@@ -84,6 +84,8 @@ class ERPNextLineWorkflowTest(unittest.TestCase):
         self.assertEqual(result["kind"], "order_intake")
         self.assertEqual(result["name"], "AIO-2")
         self.assertEqual(result["customer"], "ร้านเจริญพาณิชย์")
+        resolve = [call for call in client.calls if call[0] == "nextgen_erp.api.resolve_line_customer"][0]
+        self.assertEqual(resolve[1]["create_if_missing"], 1)
         create = [call for call in client.calls if call[0] == "nextgen_erp.api.create_ai_order_intake"][0]
         self.assertEqual(create[1]["payload"]["idempotency_key"], "evt-2")
         self.assertEqual(create[1]["payload"]["line_ref"], "U123")

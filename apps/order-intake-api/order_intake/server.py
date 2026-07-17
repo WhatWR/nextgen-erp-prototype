@@ -305,6 +305,7 @@ def build_handler(
                         line_id=customer_ref,
                         text=str(message.get("text") or ""),
                         event_id=event_id,
+                        display_name=source.get("displayName"),
                     )
                     created.append(result.get("name"))
                     continue

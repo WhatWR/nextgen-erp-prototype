@@ -70,6 +70,38 @@ class IntegrationTestAIOrderIntake(IntegrationTestCase):
 		with self.assertRaises(frappe.ValidationError):
 			doc.save()
 
+	def test_line_intake_auto_creates_and_reuses_customer(self):
+		line_id = f"U{frappe.generate_hash(length=32)}"
+		payload = self._payload(f"test-{frappe.generate_hash(length=10)}")
+		payload.update({"customer": None, "source_channel": "line", "line_ref": line_id})
+
+		created = api.create_ai_order_intake(payload)
+		doc = frappe.get_doc("AI Order Intake", created["name"])
+
+		self.assertTrue(doc.customer)
+		self.assertEqual(doc.customer, frappe.db.get_value("LINE Customer Map", line_id, "customer"))
+		self.assertEqual(doc.items[0].rate, 390)
+		self.assertEqual(api.approve_ai_order_intake(doc.name)["status"], "Awaiting Customer")
+
+	def test_approval_repairs_existing_line_intake_without_customer(self):
+		line_id = f"U{frappe.generate_hash(length=32)}"
+		payload = self._payload(f"test-{frappe.generate_hash(length=10)}")
+		payload.update({"customer": None, "source_channel": "simulator"})
+		created = api.create_ai_order_intake(payload)
+		frappe.db.set_value(
+			"AI Order Intake",
+			created["name"],
+			{"source_channel": "line", "line_ref": line_id},
+			update_modified=False,
+		)
+
+		result = api.approve_ai_order_intake(created["name"])
+		doc = frappe.get_doc("AI Order Intake", created["name"])
+
+		self.assertEqual(result["status"], "Awaiting Customer")
+		self.assertEqual(doc.customer, frappe.db.get_value("LINE Customer Map", line_id, "customer"))
+		self.assertEqual(doc.items[0].rate, 390)
+
 	def test_line_message_never_says_none_for_unresolved_items(self):
 		payload = self._payload(f"test-{frappe.generate_hash(length=10)}")
 		payload["items"] = [

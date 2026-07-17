@@ -157,6 +157,89 @@ def _selling_rate(item_code: str, customer: str, price_list: str | None = None) 
     return flt(frappe.db.get_value("Item", item_code, "standard_rate"))
 
 
+def _line_customer_identity(line_id: str, display_name: str | None = None) -> tuple[str, str]:
+    """Return a privacy-safe, deterministic ERPNext customer identity for a LINE user."""
+    line_id = (line_id or "").strip()
+    if not line_id.startswith("U"):
+        frappe.throw(_("Automatic customer creation is only available for a LINE user ID"))
+    digest = hashlib.sha256(line_id.encode("utf-8")).hexdigest()[:10].upper()
+    clean_display_name = " ".join((display_name or "").strip().split())[:80]
+    label = clean_display_name or _("LINE Customer")
+    return f"{label} [{digest}]", clean_display_name or f"LINE {digest}"
+
+
+def _resolve_or_create_line_customer(
+    line_id: str,
+    *,
+    create_if_missing: bool = False,
+    display_name: str | None = None,
+) -> dict:
+    """Resolve one LINE user to exactly one ERPNext Customer.
+
+    Customer and map names are deterministic, so webhook retries and concurrent
+    delivery cannot create a second customer for the same LINE account.
+    """
+    line_id = (line_id or "").strip()
+    if not line_id:
+        frappe.throw(_("LINE ID is required"))
+
+    customer = frappe.db.get_value("LINE Customer Map", line_id, "customer")
+    if customer:
+        return {"line_id": line_id, "customer": customer, "created": False}
+    if not create_if_missing:
+        return {"line_id": line_id, "customer": None, "created": False}
+
+    customer_name, map_display_name = _line_customer_identity(line_id, display_name)
+    customer = frappe.db.get_value("Customer", {"customer_name": customer_name}, "name")
+    customer_created = False
+    if not customer:
+        customer_doc = frappe.get_doc(
+            {
+                "doctype": "Customer",
+                "customer_name": customer_name,
+                "customer_type": "Individual",
+                "customer_group": frappe.db.get_value(
+                    "Customer Group", {"is_group": 0}, "name", order_by="creation asc"
+                )
+                or "All Customer Groups",
+                "territory": frappe.db.get_value(
+                    "Territory", {"is_group": 0}, "name", order_by="creation asc"
+                )
+                or "All Territories",
+            }
+        )
+        try:
+            customer_doc.insert(ignore_permissions=True)
+            customer = customer_doc.name
+            customer_created = True
+        except frappe.DuplicateEntryError:
+            customer = frappe.db.get_value("Customer", {"customer_name": customer_name}, "name")
+            if not customer:
+                raise
+
+    try:
+        frappe.get_doc(
+            {
+                "doctype": "LINE Customer Map",
+                "line_id": line_id,
+                "customer": customer,
+                "display_name": map_display_name,
+            }
+        ).insert(ignore_permissions=True)
+    except frappe.DuplicateEntryError:
+        # A webhook retry may have won the race. Always use the established map.
+        mapped_customer = frappe.db.get_value("LINE Customer Map", line_id, "customer")
+        if not mapped_customer:
+            raise
+        customer = mapped_customer
+
+    return {
+        "line_id": line_id,
+        "customer": customer,
+        "created": customer_created,
+    }
+
+
 def _row_label(row) -> str:
     """Customer-facing item label; unresolved rows fall back to the raw text, never None."""
     return row.item_name or row.item or (row.raw_text or "").strip() or _("Unidentified item")
@@ -519,6 +602,13 @@ def create_ai_order_intake(payload=None):
     doc.line_ref = payload.get("line_ref")
     doc.customer = payload.get("customer")
     doc.source_channel = payload.get("source_channel") or "simulator"
+    if not doc.customer and doc.source_channel == "line" and doc.line_ref:
+        mapping = _resolve_or_create_line_customer(
+            doc.line_ref,
+            create_if_missing=True,
+            display_name=payload.get("line_display_name"),
+        )
+        doc.customer = mapping.get("customer")
     doc.source_text = payload.get("source_text")
     doc.confidence = flt(payload.get("confidence"))
     requested_automation = payload.get("automation_mode") == "automatic"
@@ -591,6 +681,9 @@ def approve_ai_order_intake(name: str, reviewer: str | None = None, note: str | 
         "Paid",
     ):
         return {"name": name, "status": doc.status, "already": True}
+    if not doc.customer and doc.source_channel == "line" and doc.line_ref:
+        mapping = _resolve_or_create_line_customer(doc.line_ref, create_if_missing=True)
+        doc.customer = mapping.get("customer")
     doc.status = "Awaiting Customer"
     doc.reviewer = reviewer or frappe.session.user
     if note:
@@ -768,11 +861,18 @@ def get_line_config():
 
 
 @frappe.whitelist()
-def resolve_line_customer(line_id: str):
-    """Resolve a verified LINE sender to an ERPNext Customer."""
+def resolve_line_customer(
+    line_id: str,
+    create_if_missing: int = 0,
+    display_name: str | None = None,
+):
+    """Resolve a verified LINE sender, optionally onboarding a new customer."""
     _require_service_role()
-    customer = frappe.db.get_value("LINE Customer Map", line_id, "customer")
-    return {"line_id": line_id, "customer": customer}
+    return _resolve_or_create_line_customer(
+        line_id,
+        create_if_missing=bool(int(create_if_missing or 0)),
+        display_name=display_name,
+    )
 
 
 @frappe.whitelist()
