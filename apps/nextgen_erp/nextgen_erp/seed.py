@@ -132,6 +132,34 @@ def _ensure_erpnext_prerequisites(created: list[str]) -> None:
 		doc.insert(ignore_permissions=True)
 		created.append("Warehouse Type:Transit")
 
+	_ensure_address_template(created)
+
+
+def _ensure_address_template(created: list[str]) -> None:
+	"""Ensure Address hooks can render records on partially configured sites."""
+	default_template = frappe.db.get_value("Address Template", {"is_default": 1}, "name")
+	thai_template = frappe.db.get_value("Address Template", {"country": "Thailand"}, "name")
+	if thai_template:
+		if not default_template:
+			frappe.db.set_value("Address Template", thai_template, "is_default", 1)
+		return
+	if default_template:
+		return
+
+	from frappe.contacts.doctype.address_template.address_template import (
+		get_default_address_template,
+	)
+
+	doc = frappe.get_doc(
+		{
+			"doctype": "Address Template",
+			"country": "Thailand",
+			"is_default": 1,
+			"template": get_default_address_template(),
+		}
+	).insert(ignore_permissions=True)
+	created.append(f"Address Template:{doc.name}")
+
 
 def _ensure_company(created: list[str]) -> str:
 	existing = frappe.db.get_value("Company", {"tax_id": COMPANY_TAX_ID}, "name")
