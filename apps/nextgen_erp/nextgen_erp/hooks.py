@@ -34,7 +34,7 @@ app_logo_url = "/assets/nextgen_erp/images/nextgen-erp-icon.svg"
 
 # include js, css files in header of desk.html
 app_include_css = "/assets/nextgen_erp/css/staff_chat.css"
-app_include_js = "/assets/nextgen_erp/js/staff_chat.js"
+app_include_js = "/assets/nextgen_erp/js/staff_chat.js?v=20260717-1"
 
 # Manual, snapshot-only forecast controls in Desk. Buying documents still go
 # through the chat preview and explicit confirmation boundary.

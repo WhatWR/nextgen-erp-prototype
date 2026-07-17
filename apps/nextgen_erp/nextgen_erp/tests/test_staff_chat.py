@@ -136,6 +136,17 @@ class IntegrationTestStaffChatActions(IntegrationTestCase):
 		self.assertIsInstance(result["expires_at"], str)
 		json.dumps(result, ensure_ascii=False)
 
+	def test_guided_sales_form_creates_preview_without_ai_turn(self):
+		session = self._session()
+		result = staff_chat.prepare_sales_order_preview(
+			session.name,
+			demo.CUSTOMER,
+			items=[{"item": "DRK-M150", "qty": 2, "uom": "ลัง"}],
+		)
+		self.assertEqual(result["status"], "Pending")
+		self.assertEqual(result["preview"]["customer"], demo.CUSTOMER)
+		self.assertEqual(result["preview"]["items"][0]["item_code"], "DRK-M150")
+
 	def test_json_content_tool_call_is_normalized(self):
 		calls = staff_chat._extract_tool_calls(
 			{
@@ -150,3 +161,19 @@ class IntegrationTestStaffChatActions(IntegrationTestCase):
 		)
 		self.assertEqual(calls[0]["function"]["name"], "prepare_sales_order")
 		self.assertIn(demo.CUSTOMER, calls[0]["function"]["arguments"])
+
+	def test_malformed_tool_payload_never_leaks_and_accepts_item_code_alias(self):
+		payload = json.dumps(
+			{
+				"name": "prepare_sales_order",
+				"arguments": {
+					"customer": demo.CUSTOMER,
+					"items": [{"item_code": "DRK-M150", "qty": 2, "rate": 1}],
+				},
+			},
+			ensure_ascii=False,
+		) + "}"
+		calls = staff_chat._extract_tool_calls({"content": payload})
+		arguments = json.loads(calls[0]["function"]["arguments"])
+		self.assertEqual(arguments["items"], [{"item": "DRK-M150", "qty": 2}])
+		self.assertTrue(staff_chat._looks_like_internal_tool_payload(payload))

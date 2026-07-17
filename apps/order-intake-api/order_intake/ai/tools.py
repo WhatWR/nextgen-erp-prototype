@@ -20,6 +20,7 @@ from .rag import KnowledgeIndex, _ngrams
 CATALOG_PAGE_SIZE = 500
 CATALOG_MAX_PAGES = 2
 ITEM_RESULT_LIMIT = 8
+GENERIC_RECOMMENDATION_LIMIT = 5
 CONFIRM_EVENT_SUFFIX = ":ai-confirm"
 
 _CATALOG_QUERY_WORDS = (
@@ -127,7 +128,7 @@ def build_tools(ctx: ToolContext) -> dict[str, ToolSpec]:
                     -(float(row.get("projected_qty") or 0)),
                     str(row.get("item_code") or ""),
                 ),
-            )[:ITEM_RESULT_LIMIT]
+            )[:GENERIC_RECOMMENDATION_LIMIT]
         return {
             "items": [
                 {

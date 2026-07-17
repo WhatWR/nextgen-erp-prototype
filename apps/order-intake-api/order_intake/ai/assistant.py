@@ -52,11 +52,13 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยฝ่ายบริ�
 """
 
 _CATALOG_INTENT_RE = re.compile(
-    r"(ราคา|เท่าไหร่|กี่บาท|มีของไหม|มีไหม|สต็อก|stock|มีสินค้า|สินค้าอะไร|ขายอะไร|รายการสินค้า)",
+    r"(ราคา|เท่าไหร่|กี่บาท|มีของไหม|มีไหม|สต็อก|stock|มีสินค้า|สินค้าอะไร|ขายอะไร|รายการสินค้า|แนะนำสินค้า)",
     re.IGNORECASE,
 )
 _ORDER_CONTEXT_RE = re.compile(r"(ออเดอร์|order|ใบแจ้งหนี้|invoice|ชำระ|payment|จัดส่ง)", re.IGNORECASE)
-_GENERIC_CATALOG_RE = re.compile(r"(มีสินค้า|สินค้าอะไร|ขายอะไร|รายการสินค้า|มีอะไรบ้าง)", re.IGNORECASE)
+_GENERIC_CATALOG_RE = re.compile(
+    r"(มีสินค้า|สินค้าอะไร|ขายอะไร|รายการสินค้า|มีอะไรบ้าง|แนะนำสินค้า)", re.IGNORECASE
+)
 
 
 class AIAssistant:
@@ -149,7 +151,7 @@ class AIAssistant:
         if not items:
             return "ขออภัยค่ะ ยังไม่พบสินค้าที่ตรงกับชื่อที่ส่งมา กรุณาตรวจสอบชื่อสินค้าอีกครั้งค่ะ"
         lines = []
-        for item in items:
+        for index, item in enumerate(items, start=1):
             label = item.get("item_name") or item.get("item_code") or "สินค้า"
             code = item.get("item_code") or ""
             if code and code.lower() not in str(label).lower():
@@ -160,13 +162,16 @@ class AIAssistant:
             available = item.get("available_qty")
             if available is not None:
                 detail += f" · พร้อมขาย {float(available):g} {uom}"
-            lines.append(f"• {label} — {detail}")
+            lines.append(f"{index}. {label}\n   {detail}")
         if query:
-            return "ข้อมูลสินค้าใน ERP ล่าสุดค่ะ\n" + "\n".join(lines)
-        suffix = "\nหากต้องการสั่งซื้อ พิมพ์ชื่อสินค้า จำนวน และหน่วย เช่น “M-150 2 ลัง” ได้เลยค่ะ"
+            return "ข้อมูลจาก ERP ล่าสุดค่ะ\n\n" + "\n".join(lines) + "\n\nสั่งซื้อได้เลย เช่น “M-150 2 ลัง” ค่ะ"
+        suffix = (
+            "\n\nสั่งง่าย ๆ ในข้อความเดียว เช่น “M-150 2 ลัง” ค่ะ\n"
+            "จากนั้นระบบจะส่งสรุปออเดอร์ให้ตรวจและยืนยันก่อนชำระเงินค่ะ"
+        )
         total = int(result.get("catalog_count") or len(items))
         count_note = f" (แสดง {len(items)} จาก {total} รายการ)" if total > len(items) else ""
-        return f"สินค้าที่มีในระบบตอนนี้{count_note}ค่ะ\n" + "\n".join(lines) + suffix
+        return f"สินค้าแนะนำที่พร้อมขายจาก ERP{count_note}ค่ะ\n\n" + "\n".join(lines) + suffix
 
     # ------------------------------------------------------------------ #
     def _run_loop(

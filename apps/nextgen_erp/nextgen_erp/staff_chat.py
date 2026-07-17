@@ -205,24 +205,59 @@ def _extract_tool_calls(response: dict, tool_names: set[str] | None = None) -> l
 	if content.startswith("```"):
 		content = re.sub(r"^```(?:json)?\s*|\s*```$", "", content, flags=re.IGNORECASE)
 	try:
-		candidate = json.loads(content)
+		# raw_decode intentionally accepts harmless trailing text/braces. Some
+		# OpenAI-compatible models occasionally append one extra closing brace to
+		# an otherwise valid tool payload; that must never leak into the chat UI.
+		start = content.find("{")
+		candidate, _ = json.JSONDecoder().raw_decode(content[start:] if start >= 0 else content)
 	except (TypeError, json.JSONDecodeError):
 		return []
-	if not isinstance(candidate, dict) or candidate.get("name") not in (tool_names or TOOL_NAMES):
+	if not isinstance(candidate, dict):
+		return []
+	if isinstance(candidate.get("function"), dict):
+		candidate = candidate["function"]
+	name = candidate.get("name")
+	if name not in (tool_names or TOOL_NAMES):
 		return []
 	arguments = candidate.get("arguments")
+	if isinstance(arguments, str):
+		try:
+			arguments = json.loads(arguments)
+		except json.JSONDecodeError:
+			return []
 	if not isinstance(arguments, dict):
 		return []
+	if name == "prepare_sales_order":
+		# Be tolerant of the common item_code alias but never accept a model-
+		# supplied rate. Live rates are always recalculated inside the preview.
+		arguments["items"] = [
+			{
+				"item": row.get("item") or row.get("item_code"),
+				"qty": row.get("qty"),
+				**({"uom": row.get("uom")} if row.get("uom") else {}),
+			}
+			for row in (arguments.get("items") or [])
+			if isinstance(row, dict)
+		]
 	return [
 		{
 			"id": f"fallback-{uuid.uuid4()}",
 			"type": "function",
 			"function": {
-				"name": candidate["name"],
+				"name": name,
 				"arguments": json.dumps(arguments, ensure_ascii=False),
 			},
 		}
 	]
+
+
+def _looks_like_internal_tool_payload(content: str) -> bool:
+	content = str(content or "").strip()
+	return bool(
+		content.startswith(("{", "```"))
+		and re.search(r'"(?:name|tool_calls)"\s*:', content)
+		and any(name in content for name in TOOL_NAMES)
+	)
 
 
 def _require_staff() -> str:
@@ -499,6 +534,48 @@ def cancel_action(action_id: str):
 
 
 @frappe.whitelist()
+def prepare_sales_order_preview(
+	session_id: str,
+	customer: str,
+	items=None,
+	delivery_date: str | None = None,
+):
+	"""Create a Sales Order preview from the guided Desk form without an AI turn."""
+	user = _require_staff()
+	agents.require_agent_access("sales", user)
+	session = _session(session_id, user)
+	if (session.agent_type or "sales") != "sales":
+		frappe.throw(_("Start or switch to an AI Sales Copilot chat first"))
+	rows = _parse_json(items, [])
+	if not isinstance(rows, list) or not rows or len(rows) > 20:
+		frappe.throw(_("Add between 1 and 20 order items"))
+	clean_items = []
+	for row in rows:
+		if not isinstance(row, dict):
+			continue
+		item = str(row.get("item") or row.get("item_code") or "").strip()
+		qty = flt(row.get("qty"))
+		if not item or qty <= 0:
+			frappe.throw(_("Every item needs a product and quantity greater than zero"))
+		clean_items.append(
+			{
+				"item": item,
+				"qty": qty,
+				"uom": str(row.get("uom") or "").strip() or None,
+			}
+		)
+	return _prepare_sales_order(
+		{
+			"customer": str(customer or "").strip(),
+			"delivery_date": str(delivery_date or "").strip() or None,
+			"items": clean_items,
+		},
+		user=user,
+		session_id=session.name,
+	)
+
+
+@frappe.whitelist()
 def revise_action(action_id: str, changes=None):
 	"""Replace a pending procurement proposal with a newly validated preview.
 
@@ -661,7 +738,14 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 			if not tool_calls:
 				# After tool use, make a separate tools-disabled streaming request so
 				# Desk receives real deltas instead of one large completion.
-				final_text = "" if tool_log else str(response.get("content") or "").strip()
+				content = str(response.get("content") or "").strip()
+				if _looks_like_internal_tool_payload(content):
+					final_text = (
+						"ข้อมูลสำหรับสร้าง Preview ยังไม่ครบค่ะ "
+						"กรุณากด “เริ่มสร้างออเดอร์” แล้วกรอกลูกค้า สินค้า และจำนวน"
+					)
+				else:
+					final_text = "" if tool_log else content
 				break
 			if not response.get("tool_calls"):
 				# Normalize a JSON-in-content fallback into a valid assistant tool

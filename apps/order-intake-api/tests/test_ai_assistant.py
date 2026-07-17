@@ -125,6 +125,8 @@ class AIAssistantTest(unittest.TestCase):
         sent = [c for c in erp.calls if c[0] == "nextgen_erp.ai.send_line_answer"][0][1]["text"]
         self.assertIn("M-150", sent)
         self.assertIn("390", sent)
+        self.assertIn("สินค้าแนะนำที่พร้อมขายจาก ERP", sent)
+        self.assertIn("M-150 2 ลัง", sent)
         self.assertNotIn("ลงทะเบียน", sent)
 
     def test_price_question_is_answered_from_the_live_catalog(self):

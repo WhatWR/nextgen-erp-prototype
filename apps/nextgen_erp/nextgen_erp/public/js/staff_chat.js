@@ -503,7 +503,7 @@
 			</div>`;
 		}
 		return `<div class="ng-message-actions ng-inline-actions">
-			<button data-chat-prompt="สร้าง Sales Order Preview จากข้อมูลล่าสุด โดยตรวจราคาและสต๊อกจาก ERP อีกครั้ง">สร้าง Sales Order Preview</button>
+			<button data-start-sales-order="1">เริ่มสร้างออเดอร์</button>
 		</div>`;
 	}
 
@@ -633,6 +633,7 @@
 		if (prompt) return send(prompt.dataset.chatPrompt);
 		const generate = event.target.closest("[data-generate-forecast]");
 		if (generate) return openForecastDialog(generate.dataset.generateForecast);
+		if (event.target.closest("[data-start-sales-order]")) return openSalesOrderDialog();
 		if (event.target.closest("[data-retry]")) return send(state.lastInput);
 		const confirm = event.target.closest("[data-confirm-action]");
 		if (confirm) return confirmAction(confirm.dataset.confirmAction);
@@ -642,6 +643,96 @@
 		if (cancel) return cancelAction(cancel.dataset.cancelAction);
 		const link = event.target.closest("[data-document-type]");
 		if (link) frappe.set_route("Form", link.dataset.documentType, link.dataset.documentName);
+	}
+
+	function openSalesOrderDialog() {
+		if (!state.sessionId || state.agentKey !== "sales") {
+			frappe.msgprint("กรุณาเปิด AI Sales Copilot และเริ่มแชตก่อนค่ะ");
+			return;
+		}
+		const dialog = new frappe.ui.Dialog({
+			title: "สร้าง Sales Order Preview",
+			fields: [
+				{
+					fieldname: "customer",
+					fieldtype: "Link",
+					options: "Customer",
+					label: "ลูกค้า",
+					reqd: 1,
+				},
+				{
+					fieldname: "delivery_date",
+					fieldtype: "Date",
+					label: "วันที่ต้องการส่ง",
+				},
+				{
+					fieldname: "items",
+					fieldtype: "Table",
+					label: "สินค้า",
+					reqd: 1,
+					in_place_edit: true,
+					cannot_add_rows: false,
+					data: [],
+					fields: [
+						{
+							fieldname: "item",
+							fieldtype: "Link",
+							options: "Item",
+							label: "สินค้า",
+							in_list_view: 1,
+							reqd: 1,
+							get_query: () => ({ filters: { disabled: 0, is_sales_item: 1 } }),
+						},
+						{
+							fieldname: "qty",
+							fieldtype: "Float",
+							label: "จำนวน",
+							in_list_view: 1,
+							reqd: 1,
+						},
+						{
+							fieldname: "uom",
+							fieldtype: "Link",
+							options: "UOM",
+							label: "หน่วย",
+							in_list_view: 1,
+						},
+					],
+				},
+			],
+			primary_action_label: "ตรวจราคาและสร้าง Preview",
+			primary_action: async (values) => {
+				const rows = (values.items || []).filter((row) => row.item && Number(row.qty) > 0);
+				if (!rows.length) {
+					frappe.msgprint("กรุณาเพิ่มสินค้าและจำนวนอย่างน้อย 1 รายการ");
+					return;
+				}
+				const button = dialog.get_primary_btn();
+				button.prop("disabled", true);
+				try {
+					const action = await call("prepare_sales_order_preview", {
+						session_id: state.sessionId,
+						customer: values.customer,
+						delivery_date: values.delivery_date || null,
+						items: JSON.stringify(rows),
+					});
+					const prepared = { ...action, action_id: action.action_id };
+					state.actions.set(prepared.action_id, prepared);
+					state.messages.push({
+						role: "assistant",
+						content: "ตรวจราคา สต๊อก และข้อมูลลูกค้าจาก ERP แล้วค่ะ กรุณาตรวจ Preview ก่อนยืนยัน",
+						action: prepared,
+					});
+					dialog.hide();
+					render();
+				} catch (error) {
+					frappe.msgprint(error?.message || "สร้าง Preview ไม่สำเร็จ");
+				} finally {
+					button.prop("disabled", false);
+				}
+			},
+		});
+		dialog.show();
 	}
 
 	function openForecastDialog(itemCode = "") {
