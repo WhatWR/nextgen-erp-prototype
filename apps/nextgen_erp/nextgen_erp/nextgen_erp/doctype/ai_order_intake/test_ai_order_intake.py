@@ -1,6 +1,8 @@
 # Copyright (c) 2026, NextGen and Contributors
 # See license.txt
 
+from unittest.mock import patch
+
 import frappe
 from frappe.tests import IntegrationTestCase
 
@@ -191,3 +193,15 @@ class IntegrationTestAIOrderIntake(IntegrationTestCase):
 		message = api._line_message(doc)
 		self.assertIn(doc.sales_invoice, message)
 		self.assertIn("/api/method/nextgen_erp.api.download_invoice", message)
+
+		with patch.object(api, "_queue_line_notification") as resend:
+			retry = api.handle_line_reply(
+				doc.line_ref,
+				"ยืนยัน",
+				f"retry-{frappe.generate_hash(length=12)}",
+			)
+		self.assertTrue(retry["handled"])
+		self.assertTrue(retry["already"])
+		self.assertTrue(retry["resent"])
+		self.assertEqual(retry["sales_invoice"], doc.sales_invoice)
+		resend.assert_called_once()

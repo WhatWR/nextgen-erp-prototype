@@ -823,6 +823,9 @@ def record_customer_confirmation(name: str, confirmed: int = 1):
         return {"name": name, "status": doc.status}
 
     if doc.sales_invoice:
+        # Confirmation can be retried when the original LINE delivery failed.
+        # Re-send the same signed invoice/QR without creating any new document.
+        _queue_line_notification(doc)
         return {
             "name": name,
             "status": doc.status,
@@ -1021,6 +1024,42 @@ def handle_line_reply(line_id: str, text: str, event_id: str | None = None):
         order_by="modified desc",
     )
     if not name:
+        # The first confirmation may have completed ERP documents while its
+        # asynchronous LINE push failed. Treat a new affirmative reply as a
+        # request to resend the existing invoice, never as a new order.
+        if normalized in yes:
+            name = frappe.db.get_value(
+                "AI Order Intake",
+                {
+                    "line_ref": line_id,
+                    "status": "Awaiting Payment",
+                    "sales_invoice": ["is", "set"],
+                },
+                "name",
+                order_by="modified desc",
+            )
+            if name:
+                doc = frappe.get_doc("AI Order Intake", name)
+                _queue_line_notification(doc)
+                response = {
+                    "handled": True,
+                    "name": name,
+                    "status": doc.status,
+                    "sales_order": doc.sales_order,
+                    "sales_invoice": doc.sales_invoice,
+                    "already": True,
+                    "resent": True,
+                }
+                if event_id:
+                    frappe.get_doc(
+                        {
+                            "doctype": "LINE Event Receipt",
+                            "event_id": event_id,
+                            "line_id": line_id,
+                            "result_json": json.dumps(response, ensure_ascii=False),
+                        }
+                    ).insert()
+                return response
         return {"handled": False}
     result = record_customer_confirmation(name, confirmed=1 if normalized in yes else 0)
     response = {"handled": True, **result}
