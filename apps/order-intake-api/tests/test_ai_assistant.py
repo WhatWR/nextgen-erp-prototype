@@ -126,8 +126,29 @@ class AIAssistantTest(unittest.TestCase):
         self.assertIn("M-150", sent)
         self.assertIn("390", sent)
         self.assertIn("สินค้าแนะนำที่พร้อมขายจาก ERP", sent)
-        self.assertIn("M-150 2 ลัง", sent)
+        self.assertIn("รูปแบบ: สินค้า + จำนวน + หน่วย", sent)
+        self.assertIn("DRK-M150 2 ลัง", sent)
         self.assertNotIn("ลงทะเบียน", sent)
+
+    def test_thai_product_first_catalog_question_never_reaches_the_model(self):
+        erp = FakeClient(
+            {
+                "nextgen_erp.api.get_catalog": [CATALOG_PAGE],
+                "nextgen_erp.ai.send_line_answer": [{"sent": True}],
+            }
+        )
+        transport = ScriptedAITransport([])
+        assistant = AIAssistant(
+            erp, StaticConfig(), warehouse="Stores - NG", ai_transport=transport
+        )
+        result = assistant.answer(
+            line_id="U-new", text="สินค้ามีอะไรบ้าง", event_id="evt-product-first"
+        )
+        self.assertTrue(result["answered"])
+        self.assertEqual(result["actions"], ["get_item_info"])
+        self.assertEqual(transport.requests, [])
+        sent = [c for c in erp.calls if c[0] == "nextgen_erp.ai.send_line_answer"][0][1]["text"]
+        self.assertIn("DRK-M150 2 ลัง", sent)
 
     def test_price_question_is_answered_from_the_live_catalog(self):
         erp = FakeClient(

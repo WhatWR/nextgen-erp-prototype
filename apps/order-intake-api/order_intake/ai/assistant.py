@@ -52,12 +52,12 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยฝ่ายบริ�
 """
 
 _CATALOG_INTENT_RE = re.compile(
-    r"(ราคา|เท่าไหร่|กี่บาท|มีของไหม|มีไหม|สต็อก|stock|มีสินค้า|สินค้าอะไร|ขายอะไร|รายการสินค้า|แนะนำสินค้า)",
+    r"(ราคา|เท่าไหร่|กี่บาท|มีของไหม|มีไหม|สต็อก|stock|มีสินค้า|สินค้า(?:มี)?อะไร|ขายอะไร|รายการสินค้า|มีอะไรบ้าง|แนะนำสินค้า)",
     re.IGNORECASE,
 )
 _ORDER_CONTEXT_RE = re.compile(r"(ออเดอร์|order|ใบแจ้งหนี้|invoice|ชำระ|payment|จัดส่ง)", re.IGNORECASE)
 _GENERIC_CATALOG_RE = re.compile(
-    r"(มีสินค้า|สินค้าอะไร|ขายอะไร|รายการสินค้า|มีอะไรบ้าง|แนะนำสินค้า)", re.IGNORECASE
+    r"(มีสินค้า|สินค้า(?:มี)?อะไร|ขายอะไร|รายการสินค้า|มีอะไรบ้าง|แนะนำสินค้า)", re.IGNORECASE
 )
 
 
@@ -163,10 +163,17 @@ class AIAssistant:
             if available is not None:
                 detail += f" · พร้อมขาย {float(available):g} {uom}"
             lines.append(f"{index}. {label}\n   {detail}")
+        example_item = items[0]
+        example_product = example_item.get("item_code") or example_item.get("item_name") or "รหัสสินค้า"
+        example_uom = example_item.get("uom") or "หน่วย"
+        order_hint = (
+            f"รูปแบบ: สินค้า + จำนวน + หน่วย\n"
+            f"ตัวอย่าง: “{example_product} 2 {example_uom}”"
+        )
         if query:
-            return "ข้อมูลจาก ERP ล่าสุดค่ะ\n\n" + "\n".join(lines) + "\n\nสั่งซื้อได้เลย เช่น “M-150 2 ลัง” ค่ะ"
+            return "ข้อมูลจาก ERP ล่าสุดค่ะ\n\n" + "\n".join(lines) + f"\n\nสั่งซื้อได้เลยค่ะ\n{order_hint}"
         suffix = (
-            "\n\nสั่งง่าย ๆ ในข้อความเดียว เช่น “M-150 2 ลัง” ค่ะ\n"
+            f"\n\nสั่งง่าย ๆ ในข้อความเดียวค่ะ\n{order_hint}\n"
             "จากนั้นระบบจะส่งสรุปออเดอร์ให้ตรวจและยืนยันก่อนชำระเงินค่ะ"
         )
         total = int(result.get("catalog_count") or len(items))
