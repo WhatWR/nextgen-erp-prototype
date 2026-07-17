@@ -89,6 +89,7 @@ def run(confirm: str | None = None) -> dict:
 	_ensure_selling_prices(created)
 	warehouse = _ensure_warehouse(company, created)
 	_ensure_stock(company, warehouse, created)
+	_configure_line_fulfilment(company, warehouse)
 	invoice = _ensure_draft_invoice(company, created)
 
 	frappe.db.commit()
@@ -100,6 +101,20 @@ def run(confirm: str | None = None) -> dict:
 		"created": created,
 		"message": "Demo data is ready. Existing records were preserved.",
 	}
+
+
+def _configure_line_fulfilment(company: str, warehouse: str) -> None:
+	"""Point a fresh demo LINE channel at the same company and stock source."""
+	settings = frappe.get_single("LINE Channel Settings")
+	changed = False
+	if not settings.get("company"):
+		settings.company = company
+		changed = True
+	if not settings.get("selling_warehouse"):
+		settings.selling_warehouse = warehouse
+		changed = True
+	if changed:
+		settings.save(ignore_permissions=True)
 
 
 def _ensure_erpnext_prerequisites(created: list[str]) -> None:

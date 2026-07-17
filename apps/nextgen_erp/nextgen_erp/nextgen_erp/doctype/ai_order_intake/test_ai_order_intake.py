@@ -158,3 +158,36 @@ class IntegrationTestAIOrderIntake(IntegrationTestCase):
 		self.assertEqual(frappe.db.get_value("Sales Invoice", invoiced["sales_invoice"], "docstatus"), 1)
 		self.assertEqual(frappe.db.get_value("Payment Entry", paid["payment_entry"], "docstatus"), 1)
 		self.assertEqual(frappe.db.get_value("Delivery Note", delivered["delivery_note"], "docstatus"), 1)
+
+	def test_line_confirmation_creates_invoice_message_from_configured_stock_warehouse(self):
+		company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
+			"Global Defaults", "default_company"
+		)
+		payload = self._payload(f"test-{frappe.generate_hash(length=10)}")
+		warehouse = api._select_sales_warehouse(company, payload["items"])
+		settings = frappe.get_single("LINE Channel Settings")
+		settings.company = company
+		settings.selling_warehouse = warehouse
+		settings.save(ignore_permissions=True)
+
+		payload.update(
+			{
+				"source_channel": "line",
+				"line_ref": f"U{frappe.generate_hash(length=32)}",
+			}
+		)
+		created = api.create_ai_order_intake(payload)
+		api.approve_ai_order_intake(created["name"])
+		confirmed = api.record_customer_confirmation(created["name"], 1)
+		doc = frappe.get_doc("AI Order Intake", created["name"])
+
+		self.assertEqual(confirmed["status"], "Awaiting Payment")
+		self.assertEqual(frappe.db.get_value("Sales Order", doc.sales_order, "company"), company)
+		self.assertEqual(
+			frappe.db.get_value("Sales Order", doc.sales_order, "set_warehouse"),
+			warehouse,
+		)
+		self.assertEqual(frappe.db.get_value("Sales Invoice", doc.sales_invoice, "docstatus"), 1)
+		message = api._line_message(doc)
+		self.assertIn(doc.sales_invoice, message)
+		self.assertIn("/api/method/nextgen_erp.api.download_invoice", message)

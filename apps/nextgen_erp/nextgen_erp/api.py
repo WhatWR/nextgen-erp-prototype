@@ -102,6 +102,114 @@ def _as_list(value):
     return value or []
 
 
+def _stock_requirements(items) -> dict[str, float]:
+    """Convert requested selling UOM quantities to stock-UOM quantities."""
+    from erpnext.stock.get_item_details import get_conversion_factor
+
+    requirements: dict[str, float] = {}
+    for row in _as_list(items):
+        item_code = row.get("item_code") or row.get("sku")
+        if not item_code:
+            continue
+        qty = flt(row.get("qty"))
+        uom = row.get("uom") or frappe.db.get_value("Item", item_code, "stock_uom")
+        conversion = flt(get_conversion_factor(item_code, uom).get("conversion_factor") or 1)
+        requirements[item_code] = requirements.get(item_code, 0) + qty * conversion
+    return requirements
+
+
+def _active_sales_warehouses(company: str) -> list[str]:
+    """Return active leaf warehouses, excluding every transit warehouse."""
+    transit = frappe.db.get_value("Company", company, "default_in_transit_warehouse")
+    rows = frappe.get_all(
+        "Warehouse",
+        filters={"company": company, "is_group": 0, "disabled": 0},
+        fields=["name", "warehouse_type", "creation"],
+        order_by="creation asc",
+    )
+    return [
+        row.name
+        for row in rows
+        if row.name != transit and (row.warehouse_type or "").casefold() != "transit"
+    ]
+
+
+def _warehouse_can_fulfil(warehouse: str, requirements: dict[str, float]) -> bool:
+    from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
+        get_available_qty_to_reserve,
+    )
+
+    return all(
+        flt(get_available_qty_to_reserve(item_code, warehouse)) + 0.000001 >= required
+        for item_code, required in requirements.items()
+    )
+
+
+def _select_sales_warehouse(company: str, items, *, raise_on_missing: bool = True) -> str | None:
+    """Select one non-transit warehouse that can fulfil every order line."""
+    requirements = _stock_requirements(items)
+    if not requirements:
+        if raise_on_missing:
+            frappe.throw(_("No stock items were supplied for warehouse selection"))
+        return None
+
+    candidates: list[str] = []
+    requested = {
+        (row.get("warehouse") or "").strip()
+        for row in _as_list(items)
+        if (row.get("warehouse") or "").strip()
+    }
+    if len(requested) == 1:
+        candidates.extend(requested)
+
+    settings = frappe.get_single("LINE Channel Settings")
+    if settings.get("company") == company and settings.get("selling_warehouse"):
+        candidates.append(settings.selling_warehouse)
+    candidates.extend(_active_sales_warehouses(company))
+
+    for warehouse in dict.fromkeys(candidates):
+        if not frappe.db.exists(
+            "Warehouse",
+            {"name": warehouse, "company": company, "is_group": 0, "disabled": 0},
+        ):
+            continue
+        warehouse_type = frappe.db.get_value("Warehouse", warehouse, "warehouse_type")
+        if (warehouse_type or "").casefold() == "transit":
+            continue
+        if _warehouse_can_fulfil(warehouse, requirements):
+            return warehouse
+
+    if raise_on_missing:
+        item_summary = ", ".join(f"{code} x {qty:g}" for code, qty in requirements.items())
+        frappe.throw(
+            _("No active selling warehouse in company {0} has enough available stock for: {1}").format(
+                company, item_summary
+            )
+        )
+    return None
+
+
+def _select_sales_fulfilment(items, *, use_line_settings: bool = True) -> tuple[str, str]:
+    """Resolve the company and warehouse from LINE settings or live stock."""
+    settings = frappe.get_single("LINE Channel Settings")
+    configured_company = settings.get("company") if use_line_settings else None
+    if configured_company:
+        warehouse = _select_sales_warehouse(configured_company, items)
+        return configured_company, warehouse
+
+    default_company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
+        "Global Defaults", "default_company"
+    )
+    companies = frappe.get_all("Company", pluck="name", order_by="creation asc")
+    ordered_companies = list(dict.fromkeys(([default_company] if default_company else []) + companies))
+    for company in ordered_companies:
+        warehouse = _select_sales_warehouse(company, items, raise_on_missing=False)
+        if warehouse:
+            return company, warehouse
+
+    frappe.throw(_("No company has a non-transit warehouse with enough stock for this order"))
+
+
 def _require_any_role(allowed: set[str]) -> None:
     if frappe.session.user == "Administrator":
         return
@@ -353,12 +461,12 @@ def create_sales_order(
         pick_list = frappe.db.get_value(
             "Pick List Item", {"sales_order": existing.name, "docstatus": ["<", 2]}, "parent"
         )
+        if int(reserve_stock or 0) and not pick_list:
+            pick_list = _make_pick_list(existing.name)
         return {"sales_order": existing.name, "pick_list": pick_list, "already": True}
 
     delivery_date = delivery_date or nowdate()
-    warehouse = _default_warehouse(company)
-    if not warehouse:
-        frappe.throw(_("No non-group warehouse is configured for company {0}").format(company))
+    warehouse = _select_sales_warehouse(company, items)
 
     so = frappe.new_doc("Sales Order")
     so.customer = customer
@@ -369,6 +477,7 @@ def create_sales_order(
     so.delivery_date = delivery_date
     so.order_type = "Sales"
     so.po_no = external_reference
+    so.set_warehouse = warehouse
     # ERPNext does not allow creating a Pick List after stock is reserved on the
     # Sales Order. We therefore create the Pick List first and reserve against it.
     so.reserve_stock = 0
@@ -387,7 +496,7 @@ def create_sales_order(
                 "qty": flt(row.get("qty")),
                 "uom": row.get("uom"),
                 "rate": rate,
-                "warehouse": row.get("warehouse") or warehouse,
+                "warehouse": warehouse,
                 "delivery_date": delivery_date,
                 # Header stays off so ERPNext permits Pick List creation; the
                 # row flag allows reservation entries to be created from that Pick List.
@@ -724,15 +833,16 @@ def record_customer_confirmation(name: str, confirmed: int = 1):
     if doc.status not in ("Awaiting Customer", "Reserved"):
         frappe.throw(_("Intake must be Awaiting Customer before confirmation"))
 
-    company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
-        "Global Defaults", "default_company"
-    )
-    if not company:
-        frappe.throw(_("Configure a default ERPNext company before confirming orders"))
     items = [
         {"item_code": r.item, "qty": r.qty, "uom": r.uom, "rate": r.rate}
         for r in doc.items
     ]
+    company, warehouse = _select_sales_fulfilment(
+        items,
+        use_line_settings=doc.source_channel == "line",
+    )
+    for row in items:
+        row["warehouse"] = warehouse
     result = {}
     if not doc.sales_order:
         result = create_sales_order(

@@ -280,6 +280,8 @@ def _line_settings():
             "fields": [
                 {"fieldname": "enabled", "label": "Enable Incoming LINE Orders", "fieldtype": "Check", "default": 0},
                 {"fieldname": "merchant", "label": "Merchant", "fieldtype": "Data", "default": "demo"},
+                {"fieldname": "company", "label": "Company", "fieldtype": "Link", "options": "Company", "description": "Company used for LINE Sales Orders and invoices"},
+                {"fieldname": "selling_warehouse", "label": "Selling Warehouse", "fieldtype": "Link", "options": "Warehouse", "description": "Active non-transit warehouse used for LINE orders"},
                 {"fieldname": "channel_id", "label": "LINE Channel ID", "fieldtype": "Data"},
                 {"fieldname": "channel_secret", "label": "Channel Secret", "fieldtype": "Password", "description": "Verifies the X-Line-Signature on incoming events"},
                 {"fieldname": "channel_access_token", "label": "Channel Access Token", "fieldtype": "Password", "description": "Required to push confirmations/updates back to customers"},
