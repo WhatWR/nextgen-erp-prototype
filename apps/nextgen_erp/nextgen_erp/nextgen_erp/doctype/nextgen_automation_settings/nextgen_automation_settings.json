@@ -8,6 +8,7 @@
  "field_order": [
   "confidence_threshold",
   "auto_confirm",
+  "allow_backorder_invoicing",
   "invoice_link_days",
   "external_service_url",
   "external_service_api_key"
@@ -18,6 +19,13 @@
    "fieldname": "confidence_threshold",
    "fieldtype": "Float",
    "label": "Confidence Threshold"
+  },
+  {
+   "default": "1",
+   "description": "Let customer confirmation create the Sales Order and invoice even when stock cannot be fully reserved (make-to-order / backorder items). When off, confirmation is blocked until every line has reservable stock.",
+   "fieldname": "allow_backorder_invoicing",
+   "fieldtype": "Check",
+   "label": "Allow Invoicing Without Full Stock Reservation"
   },
   {
    "default": "1",

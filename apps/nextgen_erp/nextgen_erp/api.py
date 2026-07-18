@@ -145,14 +145,12 @@ def _warehouse_can_fulfil(warehouse: str, requirements: dict[str, float]) -> boo
     )
 
 
-def _select_sales_warehouse(company: str, items, *, raise_on_missing: bool = True) -> str | None:
-    """Select one non-transit warehouse that can fulfil every order line."""
-    requirements = _stock_requirements(items)
-    if not requirements:
-        if raise_on_missing:
-            frappe.throw(_("No stock items were supplied for warehouse selection"))
-        return None
+def _candidate_sales_warehouses(company: str, items) -> list[str]:
+    """Ordered, valid non-transit selling warehouses for a company/order.
 
+    Prefers a single explicitly requested warehouse, then the LINE selling
+    warehouse, then every active non-transit warehouse.
+    """
     candidates: list[str] = []
     requested = {
         (row.get("warehouse") or "").strip()
@@ -167,6 +165,7 @@ def _select_sales_warehouse(company: str, items, *, raise_on_missing: bool = Tru
         candidates.append(settings.selling_warehouse)
     candidates.extend(_active_sales_warehouses(company))
 
+    valid: list[str] = []
     for warehouse in dict.fromkeys(candidates):
         if not frappe.db.exists(
             "Warehouse",
@@ -176,26 +175,86 @@ def _select_sales_warehouse(company: str, items, *, raise_on_missing: bool = Tru
         warehouse_type = frappe.db.get_value("Warehouse", warehouse, "warehouse_type")
         if (warehouse_type or "").casefold() == "transit":
             continue
+        valid.append(warehouse)
+    return valid
+
+
+def _insufficient_stock_message(company: str, items) -> str:
+    """A clear, itemised Thai reason why an order cannot be fully reserved."""
+    from erpnext.stock.doctype.stock_reservation_entry.stock_reservation_entry import (
+        get_available_qty_to_reserve,
+    )
+
+    candidates = _candidate_sales_warehouses(company, items)
+    if not candidates:
+        return _("ไม่พบคลังสินค้าที่ใช้งานได้ (non-transit) ในบริษัท {0}").format(company)
+    lines: list[str] = []
+    for item_code, required in _stock_requirements(items).items():
+        available = max(
+            (flt(get_available_qty_to_reserve(item_code, wh)) for wh in candidates), default=0.0
+        )
+        if available + 0.000001 >= required:
+            continue
+        item_name = frappe.db.get_value("Item", item_code, "item_name") or item_code
+        lines.append(
+            _("{0} ({1}) ต้องการ {2:g} มีพร้อมจอง {3:g}").format(
+                item_name, item_code, required, available
+            )
+        )
+    detail = "; ".join(lines) or _("สต๊อกไม่พอสำหรับการจอง")
+    return _(
+        "ไม่สามารถจองสต๊อกในบริษัท {0} ได้: {1} "
+        "เปิด 'Allow Invoicing Without Full Stock Reservation' ใน NextGen Automation Settings "
+        "เพื่อออกใบแจ้งหนี้แบบสั่งของ (backorder)"
+    ).format(company, detail)
+
+
+def _select_sales_warehouse(
+    company: str, items, *, raise_on_missing: bool = True, allow_backorder: bool = False
+) -> str | None:
+    """Select one non-transit warehouse for an order.
+
+    Returns a warehouse that can fully reserve the order. With ``allow_backorder``
+    it falls back to a valid non-transit warehouse even without reservable stock
+    (so a backorder Sales Order can still be created).
+    """
+    requirements = _stock_requirements(items)
+    if not requirements and raise_on_missing and not allow_backorder:
+        frappe.throw(_("No stock items were supplied for warehouse selection"))
+
+    candidates = _candidate_sales_warehouses(company, items)
+    for warehouse in candidates:
         if _warehouse_can_fulfil(warehouse, requirements):
             return warehouse
 
+    if allow_backorder and candidates:
+        return candidates[0]
     if raise_on_missing:
-        item_summary = ", ".join(f"{code} x {qty:g}" for code, qty in requirements.items())
-        frappe.throw(
-            _("No active selling warehouse in company {0} has enough available stock for: {1}").format(
-                company, item_summary
-            )
-        )
+        frappe.throw(_insufficient_stock_message(company, items))
     return None
 
 
-def _select_sales_fulfilment(items, *, use_line_settings: bool = True) -> tuple[str, str]:
-    """Resolve the company and warehouse from LINE settings or live stock."""
+def _select_sales_fulfilment(
+    items, *, use_line_settings: bool = True, allow_backorder: bool = False
+) -> tuple[str, str, bool]:
+    """Resolve (company, warehouse, can_reserve) from LINE settings or live stock.
+
+    ``can_reserve`` is False only when ``allow_backorder`` let us fall back to a
+    warehouse that cannot currently reserve the full order.
+    """
     settings = frappe.get_single("LINE Channel Settings")
     configured_company = settings.get("company") if use_line_settings else None
     if configured_company:
-        warehouse = _select_sales_warehouse(configured_company, items)
-        return configured_company, warehouse
+        warehouse = _select_sales_warehouse(configured_company, items, raise_on_missing=False)
+        if warehouse:
+            return configured_company, warehouse, True
+        if allow_backorder:
+            warehouse = _select_sales_warehouse(
+                configured_company, items, raise_on_missing=False, allow_backorder=True
+            )
+            if warehouse:
+                return configured_company, warehouse, False
+        frappe.throw(_insufficient_stock_message(configured_company, items))
 
     default_company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
         "Global Defaults", "default_company"
@@ -205,9 +264,21 @@ def _select_sales_fulfilment(items, *, use_line_settings: bool = True) -> tuple[
     for company in ordered_companies:
         warehouse = _select_sales_warehouse(company, items, raise_on_missing=False)
         if warehouse:
-            return company, warehouse
+            return company, warehouse, True
 
-    frappe.throw(_("No company has a non-transit warehouse with enough stock for this order"))
+    if allow_backorder:
+        for company in ordered_companies:
+            warehouse = _select_sales_warehouse(
+                company, items, raise_on_missing=False, allow_backorder=True
+            )
+            if warehouse:
+                return company, warehouse, False
+
+    frappe.throw(
+        _insufficient_stock_message(ordered_companies[0], items)
+        if ordered_companies
+        else _("No company has a non-transit warehouse for this order")
+    )
 
 
 def _require_any_role(allowed: set[str]) -> None:
@@ -235,6 +306,17 @@ def _lock_intake(name: str):
 def _save_intake(doc) -> None:
     doc.flags.nextgen_transition = True
     doc.save()
+
+
+BACKORDER_NOTE = "ขายแบบสั่งของ - ออกใบแจ้งหนี้โดยไม่ได้จองสต๊อก (backorder)"
+
+
+def _note_backorder(doc) -> None:
+    """Flag an intake that was invoiced without a stock reservation."""
+    reasons = _as_list(doc.exception_reasons)
+    if BACKORDER_NOTE not in reasons:
+        reasons.append(BACKORDER_NOTE)
+    doc.exception_reasons = json.dumps(reasons, ensure_ascii=False)
 
 
 def _existing_by_reference(doctype: str, external_reference: str):
@@ -466,7 +548,11 @@ def create_sales_order(
         return {"sales_order": existing.name, "pick_list": pick_list, "already": True}
 
     delivery_date = delivery_date or nowdate()
-    warehouse = _select_sales_warehouse(company, items)
+    # When reserving, require a warehouse that can fully fulfil the order. When
+    # not reserving (backorder), any valid non-transit warehouse is acceptable.
+    warehouse = _select_sales_warehouse(
+        company, items, allow_backorder=not int(reserve_stock or 0)
+    )
 
     so = frappe.new_doc("Sales Order")
     so.customer = customer
@@ -840,9 +926,16 @@ def record_customer_confirmation(name: str, confirmed: int = 1):
         {"item_code": r.item, "qty": r.qty, "uom": r.uom, "rate": r.rate}
         for r in doc.items
     ]
-    company, warehouse = _select_sales_fulfilment(
+    # Defaults ON via install._ensure_backorder_default(), which writes an
+    # explicit Singles row (get_single_value coerces an unset Check to 0, so the
+    # field's "1" default alone would not take effect on existing sites).
+    allow_backorder = bool(
+        frappe.db.get_single_value("NextGen Automation Settings", "allow_backorder_invoicing")
+    )
+    company, warehouse, can_reserve = _select_sales_fulfilment(
         items,
         use_line_settings=doc.source_channel == "line",
+        allow_backorder=allow_backorder,
     )
     for row in items:
         row["warehouse"] = warehouse
@@ -855,11 +948,17 @@ def record_customer_confirmation(name: str, confirmed: int = 1):
             currency="THB",
             delivery_date=nowdate(),
             items=items,
-            reserve_stock=1,
+            reserve_stock=1 if can_reserve else 0,
         )
         doc.sales_order = result["sales_order"]
         doc.pick_list = result.get("pick_list")
-        doc.status = "Reserved"
+        # Only claim "Reserved" when stock was actually reserved; a backorder
+        # goes straight to invoicing without implying a reservation exists.
+        if can_reserve:
+            doc.status = "Reserved"
+        else:
+            _note_backorder(doc)
+            doc.status = "Awaiting Payment"
         _save_intake(doc)
     invoice = create_invoice_from_sales_order(doc.name, doc.sales_order)
     doc.sales_invoice = invoice["sales_invoice"]

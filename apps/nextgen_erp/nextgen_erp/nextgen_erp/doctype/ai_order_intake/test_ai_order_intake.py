@@ -205,3 +205,92 @@ class IntegrationTestAIOrderIntake(IntegrationTestCase):
 		self.assertTrue(retry["resent"])
 		self.assertEqual(retry["sales_invoice"], doc.sales_invoice)
 		resend.assert_called_once()
+
+	def _zero_stock_item(self):
+		"""A sellable stock item with a price but no reservable stock anywhere."""
+		code = f"ZS-{frappe.generate_hash(length=8)}"
+		frappe.get_doc(
+			{
+				"doctype": "Item",
+				"item_code": code,
+				"item_name": f"เหล็กสั่งทำ {code}",
+				"item_group": frappe.db.get_value("Item Group", {"is_group": 0}, "name")
+				or "All Item Groups",
+				"stock_uom": "Nos",
+				"is_stock_item": 1,
+				"is_sales_item": 1,
+				"standard_rate": 100,
+			}
+		).insert(ignore_permissions=True)
+		return code
+
+	def _backorder_payload(self, key, item_code):
+		return {
+			"idempotency_key": key,
+			"merchant": "test",
+			"customer": demo.CUSTOMER,
+			"source_channel": "simulator",
+			"source_text": "เหล็กข้ออ้อย DB12 5 เส้น",
+			"confidence": 0.98,
+			"automation_mode": "human_review",
+			"items": [
+				{
+					"raw_text": "เหล็กข้ออ้อย DB12 5 เส้น",
+					"item_code": item_code,
+					"qty": 5,
+					"uom": "Nos",
+					"rate": 1,
+					"confidence": 0.99,
+				}
+			],
+		}
+
+	def test_backorder_invoicing_on_invoices_without_reservation(self):
+		frappe.db.set_single_value("NextGen Automation Settings", "allow_backorder_invoicing", 1)
+		item = self._zero_stock_item()
+		created = api.create_ai_order_intake(
+			self._backorder_payload(f"test-{frappe.generate_hash(length=10)}", item)
+		)
+		api.approve_ai_order_intake(created["name"])
+		result = api.record_customer_confirmation(created["name"], 1)
+		doc = frappe.get_doc("AI Order Intake", created["name"])
+
+		self.assertEqual(result["status"], "Awaiting Payment")
+		self.assertIsNone(doc.pick_list)
+		self.assertEqual(frappe.db.get_value("Sales Order", doc.sales_order, "docstatus"), 1)
+		self.assertEqual(frappe.db.get_value("Sales Invoice", doc.sales_invoice, "docstatus"), 1)
+		self.assertEqual(
+			frappe.db.count("Stock Reservation Entry", {"voucher_no": doc.sales_order}), 0
+		)
+		self.assertIn(api.BACKORDER_NOTE, api._as_list(doc.exception_reasons))
+		self.assertIn(doc.sales_invoice, api._line_message(doc))
+
+	def test_backorder_confirmation_is_idempotent(self):
+		frappe.db.set_single_value("NextGen Automation Settings", "allow_backorder_invoicing", 1)
+		item = self._zero_stock_item()
+		created = api.create_ai_order_intake(
+			self._backorder_payload(f"test-{frappe.generate_hash(length=10)}", item)
+		)
+		api.approve_ai_order_intake(created["name"])
+		first = api.record_customer_confirmation(created["name"], 1)
+		second = api.record_customer_confirmation(created["name"], 1)
+		self.assertTrue(second["already"])
+		self.assertEqual(first["sales_invoice"], second["sales_invoice"])
+		# A repeated confirmation must not create a second Sales Order.
+		self.assertEqual(frappe.db.count("Sales Order", {"po_no": created["name"]}), 1)
+
+	def test_backorder_invoicing_off_blocks_with_itemized_error(self):
+		frappe.db.set_single_value("NextGen Automation Settings", "allow_backorder_invoicing", 0)
+		item = self._zero_stock_item()
+		created = api.create_ai_order_intake(
+			self._backorder_payload(f"test-{frappe.generate_hash(length=10)}", item)
+		)
+		api.approve_ai_order_intake(created["name"])
+		with self.assertRaises(frappe.ValidationError) as ctx:
+			api.record_customer_confirmation(created["name"], 1)
+		# The clearer message names the shortfall instead of the raw pick-list error.
+		self.assertIn("จองสต๊อก", str(ctx.exception))
+		self.assertNotIn("Pick List", str(ctx.exception))
+		doc = frappe.get_doc("AI Order Intake", created["name"])
+		self.assertEqual(doc.status, "Awaiting Customer")
+		self.assertFalse(doc.sales_order)

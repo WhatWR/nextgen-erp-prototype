@@ -44,6 +44,24 @@ def _ensure_custom_fields() -> None:
 	)
 
 
+def _ensure_backorder_default() -> None:
+	"""Default 'Allow Invoicing Without Full Stock Reservation' to ON.
+
+	get_single_value coerces an unset Check to 0, so the field's "1" default is
+	never applied on existing singletons. Write an explicit Singles row when the
+	field has never been set; a user who later unticks it (writing 0) is not
+	overridden, because the row then exists.
+	"""
+	if not frappe.db.exists("DocType", "NextGen Automation Settings"):
+		return
+	already_set = frappe.db.sql(
+		"select 1 from tabSingles where doctype=%s and field=%s limit 1",
+		("NextGen Automation Settings", "allow_backorder_invoicing"),
+	)
+	if not already_set:
+		frappe.db.set_single_value("NextGen Automation Settings", "allow_backorder_invoicing", 1)
+
+
 def before_install() -> None:
 	_ensure_role()
 
@@ -51,6 +69,7 @@ def before_install() -> None:
 def after_install() -> None:
 	_ensure_role()
 	_ensure_custom_fields()
+	_ensure_backorder_default()
 	from nextgen_erp.print_formats import ensure_print_formats
 
 	ensure_print_formats()
@@ -59,6 +78,7 @@ def after_install() -> None:
 def after_migrate() -> None:
 	_ensure_role()
 	_ensure_custom_fields()
+	_ensure_backorder_default()
 	from nextgen_erp.print_formats import ensure_print_formats
 
 	ensure_print_formats()

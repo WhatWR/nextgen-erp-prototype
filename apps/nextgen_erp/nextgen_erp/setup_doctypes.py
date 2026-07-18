@@ -490,6 +490,7 @@ def _automation_settings():
             "fields": [
                 {"fieldname": "confidence_threshold", "label": "Confidence Threshold", "fieldtype": "Float", "default": 0.95},
                 {"fieldname": "auto_confirm", "label": "Auto-route High Confidence to Customer Confirmation", "fieldtype": "Check", "default": 1},
+                {"fieldname": "allow_backorder_invoicing", "label": "Allow Invoicing Without Full Stock Reservation", "fieldtype": "Check", "default": 1, "description": "Let customer confirmation create the Sales Order and invoice even when stock cannot be fully reserved (make-to-order / backorder items)."},
                 {"fieldname": "invoice_link_days", "label": "Invoice Link Validity (Days)", "fieldtype": "Int", "default": 7},
                 {"fieldname": "external_service_url", "label": "External Service URL", "fieldtype": "Data", "description": "order-intake-api base URL for LINE reply webhooks"},
                 {"fieldname": "external_service_api_key", "label": "External Service API Key", "fieldtype": "Password"},
