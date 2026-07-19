@@ -102,9 +102,12 @@ services:
             --db-root-username root \
             --db-root-password "$${DB_ROOT_PASSWORD}" \
             --install-app erpnext \
+            --install-app erpnext_thailand \
             --install-app nextgen_erp \
             --set-default;
         else
+          bench --site "$${SITE_NAME}" list-apps | grep -qw erpnext_thailand \
+            || bench --site "$${SITE_NAME}" install-app erpnext_thailand;
           bench --site "$${SITE_NAME}" migrate;
         fi;
         bench --site "$${SITE_NAME}" set-config host_name "$${PUBLIC_URL}"
