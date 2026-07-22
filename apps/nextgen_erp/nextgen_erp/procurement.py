@@ -10,17 +10,22 @@ Recommendation``. Nothing in this module submits a Purchase Order from chat.
 from __future__ import annotations
 
 import json
+import math
 import uuid
 from typing import Any
 
 import frappe
 from frappe import _
-from frappe.utils import add_days, add_to_date, cint, flt, now_datetime, nowdate
+from frappe.utils import add_days, add_to_date, cint, flt, getdate, now_datetime, nowdate
 
 from nextgen_erp import forecast
 
 ALLOWED_ROLES = {"System Manager", "Purchase Manager", "Purchase User", "Stock Manager"}
 MODES = ("Shadow", "Approval Required", "Automatic")
+# Buyer-stated purchase priorities. "urgent" optimises for the fastest measured
+# supplier lead time, "best_price" for the lowest last purchase rate.
+PRIORITIES = ("balanced", "urgent", "best_price")
+PRIORITY_LABELS = {"balanced": "ปกติ", "urgent": "ด่วน (เน้นเร็ว)", "best_price": "เน้นราคาถูก"}
 RECOMMENDATION_STATUSES = (
 	"Draft",
 	"Suggested",
@@ -43,6 +48,8 @@ SYSTEM_PROMPT = """คุณคือผู้ช่วยฝ่ายจัด�
 7. หาก supplier, สินค้า, จำนวน, UOM หรือบริษัทกำกวม ให้ถามกลับ ห้ามเลือกเอง
 8. ตอบสั้น ชัดเจน และอ้างอิงคำเตือน (warnings) จาก tool ทุกครั้งที่มี
 9. ห้ามเดาหรือเลือก warehouse เอง ถ้าผู้ใช้ไม่ได้ระบุ warehouse ให้เว้น field นี้เพื่อให้ ERP ใช้ Default Buying Warehouse
+10. priority ต้องมาจากคำพูดของผู้ใช้เท่านั้น เช่น "ด่วน"/"ไม่แคร์ราคา" = urgent, "เอาถูกสุด"/"เน้นราคา" = best_price หากผู้ใช้ไม่ได้บอกให้เว้นว่างหรือใช้ balanced และถามกลับเมื่อไม่แน่ใจ ห้ามเดา priority เอง
+11. การอ้างว่า supplier ไหนดีกว่า เร็วกว่า หรือถูกกว่า ต้องมาจากผล compare_suppliers เท่านั้น ห้ามสรุปเอง
 """
 
 ACTION_PREVIEW_TEXT = (
@@ -124,6 +131,22 @@ TOOLS: list[dict[str, Any]] = [
 			"parameters": {
 				"type": "object",
 				"properties": {"item_code": {"type": "string"}, "supplier": {"type": "string"}},
+				"required": ["item_code"],
+				"additionalProperties": False,
+			},
+		},
+	},
+	{
+		"type": "function",
+		"function": {
+			"name": "compare_suppliers",
+			"description": "เปรียบเทียบ supplier ของสินค้า: ราคาล่าสุด, lead time จริงจากการรับของ, ความตรงเวลา และคำแนะนำตาม priority (balanced/urgent/best_price)",
+			"parameters": {
+				"type": "object",
+				"properties": {
+					"item_code": {"type": "string"},
+					"priority": {"type": "string", "enum": ["balanced", "urgent", "best_price"]},
+				},
 				"required": ["item_code"],
 				"additionalProperties": False,
 			},
@@ -236,11 +259,12 @@ TOOLS: list[dict[str, Any]] = [
 		"type": "function",
 		"function": {
 			"name": "prepare_purchase_order",
-			"description": "เตรียม preview ของ Purchase Order เพื่อให้พนักงานยืนยันก่อนสร้าง (ไม่สร้างเอกสารจริง)",
+			"description": "เตรียม preview ของ Purchase Order เพื่อให้พนักงานยืนยันก่อนสร้าง (ไม่สร้างเอกสารจริง) หากผู้ใช้ระบุ priority (เช่น ด่วน/เน้นราคาถูก) และไม่ระบุ supplier ระบบจะเลือก supplier ที่เหมาะสุดให้พร้อมเหตุผล",
 			"parameters": {
 				"type": "object",
 				"properties": {
 					"supplier": {"type": "string"},
+					"priority": {"type": "string", "enum": ["balanced", "urgent", "best_price"]},
 					"items": {
 						"type": "array",
 						"items": {
@@ -257,7 +281,7 @@ TOOLS: list[dict[str, Any]] = [
 					"schedule_date": {"type": "string"},
 					"warehouse": {"type": "string"},
 				},
-				"required": ["supplier", "items"],
+				"required": ["items"],
 				"additionalProperties": False,
 			},
 		},
@@ -390,6 +414,201 @@ def _supplier_item_terms(item_code: str, supplier: str | None = None) -> dict:
 				for row in last
 			]
 	return result
+
+
+def _supplier_stats(item_code: str, limit: int = 8) -> list[dict]:
+	"""Deterministic per-supplier statistics for one item, from ERP data only.
+
+	Covers every supplier linked via Item Supplier plus any supplier with
+	submitted POs for the item. ``measured_lead_days`` comes from actual
+	PO → first Purchase Receipt intervals; when no receipts exist it falls back
+	to Item.lead_time_days / the settings default and says so via ``lead_source``.
+	``on_time_rate`` is null (ไม่มีข้อมูล) without receipts — never fabricated.
+	"""
+	settings = forecast.get_settings()
+	item = frappe.db.get_value("Item", item_code, ["lead_time_days"], as_dict=True) or frappe._dict()
+	fallback_lead = cint(item.lead_time_days) or settings["default_lead_time_days"]
+	fallback_source = "Item.lead_time_days" if cint(item.lead_time_days) else "settings default"
+
+	po_rows = frappe.db.sql(
+		"""
+		select po.name, po.supplier, po.transaction_date, poi.rate, poi.qty, poi.schedule_date
+		from `tabPurchase Order Item` poi
+		join `tabPurchase Order` po on po.name = poi.parent
+		where poi.item_code = %(item)s and po.docstatus = 1
+		order by po.transaction_date desc, po.creation desc
+		limit 60
+		""",
+		{"item": item_code},
+		as_dict=True,
+	)
+	receipt_rows = frappe.db.sql(
+		"""
+		select pri.purchase_order, min(pr.posting_date) as received_on
+		from `tabPurchase Receipt Item` pri
+		join `tabPurchase Receipt` pr on pr.name = pri.parent
+		where pri.item_code = %(item)s and pr.docstatus = 1 and pri.purchase_order is not null
+		group by pri.purchase_order
+		""",
+		{"item": item_code},
+		as_dict=True,
+	)
+	received = {row.purchase_order: getdate(row.received_on) for row in receipt_rows}
+
+	linked = frappe.get_all(
+		"Item Supplier",
+		filters={"parent": item_code, "parenttype": "Item"},
+		pluck="supplier",
+		limit=limit,
+	)
+	price_list_rate = flt(
+		frappe.db.get_value(
+			"Item Price",
+			{"item_code": item_code, "buying": 1},
+			"price_list_rate",
+			order_by="valid_from desc, modified desc",
+		)
+	)
+
+	per_supplier: dict[str, dict] = {}
+	for supplier in linked:
+		per_supplier[supplier] = {"orders": []}
+	for row in po_rows:
+		per_supplier.setdefault(row.supplier, {"orders": []})["orders"].append(row)
+
+	stats: list[dict] = []
+	for supplier, data in per_supplier.items():
+		meta = frappe.db.get_value(
+			"Supplier", supplier, ["supplier_name", "disabled", "on_hold"], as_dict=True
+		)
+		if not meta or cint(meta.disabled):
+			continue
+		orders = data["orders"]
+		lead_samples: list[int] = []
+		on_time_samples: list[bool] = []
+		for order in orders:
+			received_on = received.get(order.name)
+			if not received_on:
+				continue
+			lead_samples.append(max(0, (received_on - getdate(order.transaction_date)).days))
+			if order.schedule_date:
+				on_time_samples.append(received_on <= getdate(order.schedule_date))
+		measured = round(sum(lead_samples) / len(lead_samples), 1) if lead_samples else None
+		last_rate = flt(orders[0].rate) if orders else 0.0
+		rates = [flt(order.rate) for order in orders if flt(order.rate)]
+		stats.append(
+			{
+				"supplier": supplier,
+				"supplier_name": meta.supplier_name or supplier,
+				"on_hold": cint(meta.on_hold),
+				"linked": supplier in linked,
+				"last_rate": last_rate or price_list_rate,
+				"rate_source": "last PO" if last_rate else ("buying price list" if price_list_rate else "unknown"),
+				"avg_rate": round(sum(rates) / len(rates), 2) if rates else 0.0,
+				"order_count": len(orders),
+				"total_qty": round(sum(flt(order.qty) for order in orders), 2),
+				"last_order_date": str(orders[0].transaction_date) if orders else None,
+				"measured_lead_days": measured,
+				"effective_lead_days": measured if measured is not None else fallback_lead,
+				"lead_source": "measured from receipts" if measured is not None else fallback_source,
+				"received_lots": len(lead_samples),
+				"on_time_rate": (
+					round(sum(on_time_samples) / len(on_time_samples), 2) if on_time_samples else None
+				),
+			}
+		)
+
+	cheapest = min((row["last_rate"] for row in stats if row["last_rate"] > 0), default=0.0)
+	for row in stats:
+		row["price_premium_percent"] = (
+			round((row["last_rate"] - cheapest) / cheapest * 100, 2)
+			if cheapest and row["last_rate"] > 0
+			else 0.0
+		)
+	return stats[:limit]
+
+
+def _rank_suppliers(stats: list[dict], priority: str) -> list[dict]:
+	"""Deterministic ranking. Suppliers without any price rank last."""
+	no_rate = 10**9
+
+	def rate_key(row):
+		return row["last_rate"] if row["last_rate"] > 0 else no_rate
+
+	def urgent_key(row):
+		return (row["effective_lead_days"], rate_key(row), row["supplier"])
+
+	def best_price_key(row):
+		return (rate_key(row), row["effective_lead_days"], row["supplier"])
+
+	rates = [rate_key(row) for row in stats if rate_key(row) != no_rate]
+	leads = [row["effective_lead_days"] for row in stats]
+	rate_span = ((max(rates) - min(rates)) or 1) if rates else 1
+	lead_span = ((max(leads) - min(leads)) or 1) if leads else 1
+
+	def balanced_key(row):
+		rate_score = ((rate_key(row) - min(rates)) / rate_span) if rates and rate_key(row) != no_rate else 1.0
+		lead_score = ((row["effective_lead_days"] - min(leads)) / lead_span) if leads else 0.0
+		return (round(rate_score + lead_score, 6), row["supplier"])
+
+	key = {"urgent": urgent_key, "best_price": best_price_key}.get(priority, balanced_key)
+	ranked = sorted(stats, key=key)
+	for index, row in enumerate(ranked, start=1):
+		row["rank"] = index
+		row["recommended"] = index == 1
+	return ranked
+
+
+def _priority_reason(ranked: list[dict], priority: str) -> str:
+	"""Thai explanation for why the top supplier was picked."""
+	if not ranked:
+		return ""
+	top = ranked[0]
+	parts = [f"{PRIORITY_LABELS.get(priority, priority)}: เลือก {top['supplier']}"]
+	if priority == "urgent":
+		parts.append(f"lead เร็วสุด ~{top['effective_lead_days']:g} วัน ({top['lead_source']})")
+		if top["price_premium_percent"] > 0:
+			parts.append(f"ยอมรับราคาแพงกว่าราคาต่ำสุด +{top['price_premium_percent']:g}%")
+		elif top["last_rate"] > 0:
+			parts.append("และเป็นราคาต่ำสุดด้วย")
+	elif priority == "best_price":
+		parts.append(f"ราคาต่ำสุด {top['last_rate']:g} บาท/หน่วย ({top['rate_source']})")
+		fastest = min(ranked, key=lambda row: row["effective_lead_days"])
+		gap = top["effective_lead_days"] - fastest["effective_lead_days"]
+		if gap > 0:
+			parts.append(f"ช้ากว่าตัวเร็วสุด +{gap:g} วัน")
+	else:
+		parts.append(
+			f"สมดุลราคา/ความเร็ว (lead ~{top['effective_lead_days']:g} วัน, {top['last_rate']:g} บาท/หน่วย)"
+		)
+	return " ".join(parts)
+
+
+def _compare_suppliers(item_code: str, priority: str | None = None) -> dict:
+	if not frappe.db.exists("Item", item_code):
+		return {"error": f"Unknown item: {item_code}"}
+	priority = priority if priority in PRIORITIES else "balanced"
+	stats = _supplier_stats(item_code)
+	if not stats:
+		return {
+			"item_code": item_code,
+			"suppliers": [],
+			"message": "ยังไม่มี supplier ผูกกับสินค้านี้และไม่มีประวัติ PO",
+		}
+	ranked = _rank_suppliers(stats, priority)
+	return {
+		"item_code": item_code,
+		"item_name": frappe.db.get_value("Item", item_code, "item_name"),
+		"priority": priority,
+		"priority_label": PRIORITY_LABELS[priority],
+		"suppliers": ranked,
+		"recommended": {
+			"supplier": ranked[0]["supplier"],
+			"supplier_name": ranked[0]["supplier_name"],
+			"reason": _priority_reason(ranked, priority),
+		},
+		"comparison_card": True,
+	}
 
 
 def _list_open_purchase_orders(supplier: str | None, item_code: str | None, limit: int = 10) -> dict:
@@ -653,7 +872,22 @@ def _build_procurement_lines(
 			"buying_price_list_rate": item_forecast["buying_price_list_rate"],
 			"last_purchase_rate": item_forecast["last_purchase_rate"],
 		})
-		if live_rate <= 0:
+		# Manual rate overrides only arrive via staff_chat.revise_action (the
+		# dispatch layer strips these keys from model-supplied arguments). The
+		# override is honoured but permanently audited via a warning.
+		rate = live_rate
+		rate_overridden = 0
+		rate_override_by = ""
+		if requested.get("rate_overridden") and flt(requested.get("rate")) > 0:
+			rate = flt(requested.get("rate"))
+			rate_overridden = 1
+			rate_override_by = str(requested.get("rate_override_by") or "").strip() or "ผู้ใช้"
+			rate_source = "manual override"
+			warnings.append(
+				f"ราคา {match.name} ถูกกำหนดเองโดย {rate_override_by}: {rate:g} บาท "
+				f"(ราคาระบบ {live_rate:g})"
+			)
+		elif live_rate <= 0:
 			warnings.append(f"ไม่พบราคาซื้อ: {match.name}")
 		if supplier and supplier not in (item_forecast["suppliers"] or []):
 			warnings.append(f"Supplier ยังไม่ผูกกับสินค้า {match.name} (Item Supplier)")
@@ -670,11 +904,14 @@ def _build_procurement_lines(
 				"stock_qty": round(stock_qty, 4),
 				"stock_uom": item_forecast["stock_uom"],
 				"suggested_qty": suggested_qty,
-				"rate": live_rate,
+				"rate": rate,
 				"rate_source": rate_source,
+				"system_rate": live_rate,
+				"rate_overridden": rate_overridden,
+				"rate_override_by": rate_override_by,
 				"last_purchase_rate": item_forecast["last_purchase_rate"],
 				"price_variance_percent": item_forecast["price_variance_percent"],
-				"amount": round(qty * live_rate, 2),
+				"amount": round(qty * rate, 2),
 				"min_order_qty": moq,
 				"order_multiple": order_multiple,
 				"warehouse": warehouse,
@@ -763,21 +1000,61 @@ def _prepare_purchase_order(arguments: dict, *, user: str, session_id: str) -> d
 
 	settings = forecast.get_settings()
 	warnings: list[str] = []
+	raw_priority = str(arguments.get("priority") or "").strip().lower()
+	priority = raw_priority if raw_priority in PRIORITIES else "balanced"
 	requested_supplier = str(arguments.get("supplier") or "").strip()
-	supplier_match, supplier_ambiguous = _best_match(_search_suppliers(requested_supplier, 5))
+	requested_items = arguments.get("items") if isinstance(arguments.get("items"), list) else []
+
 	supplier = None
 	supplier_name = requested_supplier
-	if not supplier_match:
-		warnings.append(f"ไม่พบ supplier: {requested_supplier or '(ว่าง)'}")
+	supplier_auto_selected = False
+	priority_note = ""
+	ranked_stats: list[dict] = []
+	first_item = None
+	if requested_items:
+		first_match, _first_ambiguous = _best_match(
+			_search_items(str(requested_items[0].get("item") or ""), 5)
+		)
+		first_item = first_match.name if first_match else None
+	if first_item and (raw_priority in PRIORITIES or not requested_supplier):
+		ranked_stats = _rank_suppliers(_supplier_stats(first_item), priority)
+
+	if requested_supplier:
+		supplier_match, supplier_ambiguous = _best_match(_search_suppliers(requested_supplier, 5))
+		if not supplier_match:
+			warnings.append(f"ไม่พบ supplier: {requested_supplier}")
+		else:
+			supplier = supplier_match.name
+			supplier_name = supplier_match.supplier_name or supplier
+			if supplier_ambiguous:
+				warnings.append(f"ชื่อ supplier กำกวม: {requested_supplier}")
+			if cint(supplier_match.disabled):
+				warnings.append(f"Supplier ถูกปิดใช้งาน: {supplier}")
+			if cint(supplier_match.on_hold):
+				warnings.append(f"Supplier ถูกระงับ (on hold): {supplier}")
+	elif raw_priority in PRIORITIES:
+		# The buyer stated a priority but no supplier: the server picks the
+		# top-ranked eligible supplier deterministically and explains why.
+		eligible = [row for row in ranked_stats if not row["on_hold"]]
+		if eligible:
+			supplier = eligible[0]["supplier"]
+			supplier_name = eligible[0]["supplier_name"]
+			supplier_auto_selected = True
+			priority_note = _priority_reason(eligible, priority)
+		else:
+			warnings.append("ไม่พบ supplier ที่ใช้ได้สำหรับสินค้านี้")
 	else:
-		supplier = supplier_match.name
-		supplier_name = supplier_match.supplier_name or supplier
-		if supplier_ambiguous:
-			warnings.append(f"ชื่อ supplier กำกวม: {requested_supplier}")
-		if cint(supplier_match.disabled):
-			warnings.append(f"Supplier ถูกปิดใช้งาน: {supplier}")
-		if cint(supplier_match.on_hold):
-			warnings.append(f"Supplier ถูกระงับ (on hold): {supplier}")
+		warnings.append("ไม่พบ supplier: (ว่าง)")
+
+	if supplier and not priority_note and priority != "balanced":
+		chosen = next((row for row in ranked_stats if row["supplier"] == supplier), None)
+		if chosen:
+			priority_note = (
+				f"{PRIORITY_LABELS[priority]}: ใช้ {supplier} lead ~{chosen['effective_lead_days']:g} วัน "
+				f"({chosen['lead_source']})"
+			)
+			if priority == "urgent" and chosen["price_premium_percent"] > 0:
+				priority_note += f" ยอมรับราคาแพงกว่าราคาต่ำสุด +{chosen['price_premium_percent']:g}%"
 
 	company, _sales_warehouse = _defaults()
 	warehouse, warehouse_warnings = _resolve_preview_warehouse(
@@ -789,15 +1066,40 @@ def _prepare_purchase_order(arguments: dict, *, user: str, session_id: str) -> d
 	if not warehouse:
 		warnings.append("ยังไม่ได้กำหนดคลังสินค้าเริ่มต้น")
 
-	requested_items = arguments.get("items") if isinstance(arguments.get("items"), list) else []
 	lines, line_warnings, scores = _build_procurement_lines(requested_items, supplier, warehouse, settings)
 	warnings.extend(line_warnings)
 	if not lines:
 		warnings.append("ไม่มีรายการสินค้าที่ใช้ได้")
 		scores.append(0)
 
-	max_lead = max((line["forecast"]["lead_time_days"] for line in lines), default=settings["default_lead_time_days"])
-	schedule_date = str(arguments.get("schedule_date") or "").strip() or str(add_days(nowdate(), max_lead))
+	# Per-line premium of the chosen supplier vs the cheapest option for the
+	# same item — only when a priority is in play, to keep the default path light.
+	if supplier and priority != "balanced":
+		stats_cache: dict[str, dict] = {}
+		for line in lines:
+			item_code = line["item_code"]
+			if item_code not in stats_cache:
+				stats_cache[item_code] = {
+					row["supplier"]: row for row in _supplier_stats(item_code)
+				}
+			chosen_row = stats_cache[item_code].get(supplier)
+			if chosen_row:
+				line["price_premium_percent"] = chosen_row["price_premium_percent"]
+
+	chosen_stats = next((row for row in ranked_stats if row["supplier"] == supplier), None)
+	explicit_schedule = str(arguments.get("schedule_date") or "").strip()
+	if explicit_schedule:
+		schedule_date = explicit_schedule
+	elif priority == "urgent" and chosen_stats:
+		# Urgent orders use the supplier's real measured lead, not the item default.
+		urgent_lead = max(1, math.ceil(flt(chosen_stats["effective_lead_days"])))
+		schedule_date = str(add_days(nowdate(), urgent_lead))
+	else:
+		max_lead = max(
+			(line["forecast"]["lead_time_days"] for line in lines),
+			default=settings["default_lead_time_days"],
+		)
+		schedule_date = str(add_days(nowdate(), max_lead))
 	if schedule_date < nowdate():
 		warnings.append(f"Schedule date ย้อนหลัง: {schedule_date}")
 
@@ -813,6 +1115,10 @@ def _prepare_purchase_order(arguments: dict, *, user: str, session_id: str) -> d
 		"document_type": "Purchase Order",
 		"supplier": supplier or requested_supplier,
 		"supplier_name": supplier_name,
+		"supplier_auto_selected": supplier_auto_selected,
+		"priority": priority,
+		"priority_label": PRIORITY_LABELS[priority],
+		"priority_note": priority_note,
 		"company": company,
 		"warehouse": warehouse,
 		"schedule_date": schedule_date,
@@ -904,6 +1210,8 @@ def dispatch_tool(name: str, arguments: dict, *, user: str, session_id: str) -> 
 		return _purchase_history(str(arguments.get("item_code") or ""))
 	if name == "get_supplier_item_terms":
 		return _supplier_item_terms(str(arguments.get("item_code") or ""), arguments.get("supplier"))
+	if name == "compare_suppliers":
+		return _compare_suppliers(str(arguments.get("item_code") or ""), arguments.get("priority"))
 	if name == "list_open_purchase_orders":
 		return _list_open_purchase_orders(
 			arguments.get("supplier"), arguments.get("item_code"), arguments.get("limit") or 10
@@ -920,9 +1228,19 @@ def dispatch_tool(name: str, arguments: dict, *, user: str, session_id: str) -> 
 		return _forecast_tool(
 			str(arguments.get("item_code") or ""), arguments.get("warehouse"), arguments.get("horizon_days")
 		)
-	if name == "prepare_material_request":
-		return _prepare_material_request(arguments, user=user, session_id=session_id)
-	if name == "prepare_purchase_order":
+	if name in ("prepare_material_request", "prepare_purchase_order"):
+		# Trust boundary: manual rate overrides may only enter through
+		# staff_chat.revise_action (which calls _prepare_* directly). Anything
+		# the model puts in these keys is dropped before preparation.
+		arguments = dict(arguments)
+		if isinstance(arguments.get("items"), list):
+			arguments["items"] = [
+				{key: value for key, value in row.items() if key in ("item", "qty", "uom")}
+				for row in arguments["items"]
+				if isinstance(row, dict)
+			]
+		if name == "prepare_material_request":
+			return _prepare_material_request(arguments, user=user, session_id=session_id)
 		return _prepare_purchase_order(arguments, user=user, session_id=session_id)
 	return {"error": f"Unknown or forbidden tool: {name}"}
 
@@ -997,17 +1315,22 @@ def _revalidate_action(action, preview: dict, settings: dict) -> tuple[dict, lis
 			if not linked:
 				issues.append(f"Supplier ยังไม่ผูกกับสินค้า {item_code}")
 		# 7. lead time still resolvable (default is acceptable but recheck config)
-		# 8. current purchase rate and price variance
+		# 8. current purchase rate and price variance. A manually overridden rate
+		# is the buyer's explicit, audited decision: the variance check must not
+		# block it (the override warning stays attached to the action), but every
+		# other guardrail — budget, MOQ, stock drift — still applies.
 		prices = forecast._purchase_price_history(item_code)
 		live_rate, _source = _live_rate(item_code, supplier, prices)
 		preview_rate = flt(row.get("rate"))
-		if live_rate <= 0:
-			issues.append(f"ไม่พบราคาซื้อปัจจุบัน: {item_code}")
-		elif preview_rate and abs(live_rate - preview_rate) / preview_rate * 100 > settings["maximum_price_variance_percent"]:
-			issues.append(
-				f"ราคาซื้อของ {item_code} เปลี่ยนเกิน {settings['maximum_price_variance_percent']:g}% "
-				f"({preview_rate:g} → {live_rate:g})"
-			)
+		rate_overridden = bool(row.get("rate_overridden"))
+		if not rate_overridden:
+			if live_rate <= 0:
+				issues.append(f"ไม่พบราคาซื้อปัจจุบัน: {item_code}")
+			elif preview_rate and abs(live_rate - preview_rate) / preview_rate * 100 > settings["maximum_price_variance_percent"]:
+				issues.append(
+					f"ราคาซื้อของ {item_code} เปลี่ยนเกิน {settings['maximum_price_variance_percent']:g}% "
+					f"({preview_rate:g} → {live_rate:g})"
+				)
 		# 9. MOQ / order multiple
 		moq = flt(row.get("min_order_qty"))
 		stock_qty = qty * conversion
@@ -1016,7 +1339,8 @@ def _revalidate_action(action, preview: dict, settings: dict) -> tuple[dict, lis
 		multiple = flt(row.get("order_multiple"))
 		if multiple > 0 and stock_qty > 0 and round(stock_qty % multiple, 6) not in (0, multiple):
 			issues.append(f"จำนวน {item_code} ไม่ตรง order multiple {multiple:g}")
-		effective_rate = live_rate or preview_rate
+		# Overridden lines keep the buyer's rate; system lines refresh to live.
+		effective_rate = preview_rate if rate_overridden else (live_rate or preview_rate)
 		total += qty * effective_rate
 		live_items.append({**row, "rate": effective_rate, "amount": round(qty * effective_rate, 2)})
 

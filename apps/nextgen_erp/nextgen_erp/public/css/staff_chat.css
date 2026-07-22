@@ -93,6 +93,20 @@
 #nextgen-agent-menu small { display: block; color: var(--text-muted, #64748b); font-size: 11px; }
 .ng-chat-header-actions { display: flex; gap: 4px; }
 .ng-chat-header button { border: 0; background: transparent; color: inherit; font-size: 20px; cursor: pointer; }
+.ng-chat-header .ng-new-chat-button {
+	display: inline-flex;
+	align-items: center;
+	gap: 3px;
+	border: 1px solid var(--border-color, #dbe2ea);
+	border-radius: 8px;
+	padding: 5px 8px;
+	background: var(--subtle-fg, #f8fafc);
+	font-size: 12px;
+	font-weight: 600;
+}
+.ng-new-chat-button span:first-child { font-size: 16px; line-height: 1; }
+.ng-chat-header .ng-new-chat-button:hover { border-color: var(--ng-agent-color, #2563eb); color: var(--ng-agent-color, #2563eb); }
+.ng-chat-header .ng-new-chat-button:disabled { opacity: .5; cursor: not-allowed; }
 
 #nextgen-chat-messages {
 	flex: 1;
@@ -198,3 +212,20 @@
 	#nextgen-chat-launcher { right: 14px; bottom: 14px; }
 	#nextgen-chat-panel { width: 100vw; }
 }
+
+/* Priority + vendor comparison */
+.ng-priority-chip { padding: 2px 8px; border-radius: 999px; font-size: 11px; white-space: nowrap; }
+.ng-priority-urgent { background: #fef3c7; color: #b45309; }
+.ng-priority-best_price { background: #dbeafe; color: #1d4ed8; }
+.ng-priority-balanced { background: var(--subtle-fg, #f1f5f9); color: var(--text-muted, #475569); }
+.ng-priority-note { margin: 6px 0; padding: 6px 9px; border-radius: 8px; background: #fffbeb; color: #92400e; font-size: 12px; }
+.ng-manual-rate { padding: 1px 6px; border-radius: 999px; background: #fee2e2; color: #b91c1c; font-size: 10px; }
+.ng-auto-picked { color: var(--text-muted, #64748b); font-size: 11px; }
+
+.ng-comparison-card { border-color: #bfdbfe; }
+.ng-comparison-scroll { overflow-x: auto; }
+.ng-comparison-card table { width: 100%; margin-top: 8px; font-size: 12px; border-collapse: collapse; }
+.ng-comparison-card th { padding: 4px 6px; color: var(--text-muted, #64748b); font-weight: 500; text-align: left; border-bottom: 1px solid var(--border-color, #e5e7eb); white-space: nowrap; }
+.ng-comparison-card td { padding: 6px; border-bottom: 1px solid var(--border-color, #eef2f7); vertical-align: top; }
+.ng-comparison-card td small { display: block; color: var(--text-muted, #94a3b8); font-size: 10px; }
+.ng-vendor-recommended td { background: #f0fdf4; }

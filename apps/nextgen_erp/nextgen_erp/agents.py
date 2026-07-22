@@ -70,6 +70,18 @@ class Agent:
 
 	def public_config(self) -> dict:
 		"""Safe client bootstrap payload. Never includes prompts, models or keys."""
+		suggested_questions = list(self.suggested_questions)
+		if self.key == "procurement":
+			item_label = _live_procurement_item_label()
+			if item_label:
+				suggested_questions = [
+					question.format(item=item_label) for question in suggested_questions
+				]
+			else:
+				suggested_questions = [
+					question.replace("{item}", "สินค้าที่เสี่ยงขาดที่สุด")
+					for question in suggested_questions
+				]
 		return {
 			"key": self.key,
 			"title": self.title,
@@ -78,8 +90,42 @@ class Agent:
 			"color": self.color,
 			"route_keywords": list(self.route_keywords),
 			"welcome_message": self.welcome_message,
-			"suggested_questions": list(self.suggested_questions),
+			"suggested_questions": suggested_questions,
 		}
+
+
+def _live_procurement_item_label() -> str | None:
+	"""Pick a real purchase item for UI examples, preferring current forecasts.
+
+	The suggestion is only a shortcut label. Every answer and preview still goes
+	through the procurement tools, which read and revalidate live ERP data.
+	"""
+	if frappe.db.table_exists("NextGen Procurement Forecast"):
+		for risk in ("high", "medium", "low"):
+			rows = frappe.get_all(
+				"NextGen Procurement Forecast",
+				filters={"stockout_risk": risk, "suggested_qty": [">", 0]},
+				fields=["item", "item_name"],
+				order_by="forecast_date desc, suggested_qty desc, creation desc",
+				limit=1,
+			)
+			if rows and frappe.db.exists(
+				"Item", {"name": rows[0].item, "disabled": 0, "is_purchase_item": 1}
+			):
+				name = (rows[0].item_name or "").strip()
+				return f"{rows[0].item} ({name})" if name and name != rows[0].item else rows[0].item
+
+	rows = frappe.get_all(
+		"Item",
+		filters={"disabled": 0, "is_stock_item": 1, "is_purchase_item": 1},
+		fields=["name", "item_name"],
+		order_by="modified desc, name asc",
+		limit=1,
+	)
+	if not rows:
+		return None
+	name = (rows[0].item_name or "").strip()
+	return f"{rows[0].name} ({name})" if name and name != rows[0].name else rows[0].name
 
 
 AGENTS: dict[str, Agent] = {
@@ -128,7 +174,9 @@ AGENTS: dict[str, Agent] = {
 			"สินค้าตัวไหนเสี่ยงขาดใน 30 วัน",
 			"สรุปสินค้าหมุนเร็วจาก 90 วันที่ผ่านมา",
 			"ควรสั่งซื้ออะไรในสัปดาห์นี้",
-			"วิเคราะห์ M-150 และสร้าง Purchase Order preview",
+			"วิเคราะห์ {item} และสร้าง Purchase Order preview",
+			"เปรียบเทียบ supplier ของ {item}",
+			"สั่งด่วน {item} ไม่เน้นราคา",
 			"แสดง Purchase Order ที่ยังรับของไม่ครบ",
 			"ราคาซื้อล่าสุดเปลี่ยนจากรอบก่อนเท่าไร",
 		),

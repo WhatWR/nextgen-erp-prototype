@@ -48,6 +48,13 @@ class IntegrationTestAgentRouting(IntegrationTestCase):
 			self.assertTrue(agent.route_keywords)
 			self.assertTrue(agent.tool_names)
 
+	def test_procurement_suggestions_are_resolved_from_live_erp_data(self):
+		procurement_agent = agents.AGENTS["procurement"]
+		self.assertNotIn("M-150", "\n".join(procurement_agent.suggested_questions))
+		questions = procurement_agent.public_config()["suggested_questions"]
+		self.assertTrue(questions)
+		self.assertNotIn("{item}", "\n".join(questions))
+
 	def test_sales_route_selects_sales_agent(self):
 		self.assertEqual(agents.resolve_route_agent("Workspaces/AI Sales Copilot"), "sales")
 		self.assertEqual(agents.resolve_route_agent("Workspaces/Selling"), "sales")

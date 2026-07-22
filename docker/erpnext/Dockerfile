@@ -6,6 +6,8 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends fonts-noto-core \
     && rm -rf /var/lib/apt/lists/*
 COPY --chown=frappe:frappe apps/nextgen_erp /home/frappe/frappe-bench/apps/nextgen_erp
+COPY --chown=frappe:frappe import.py /home/frappe/frappe-bench/import.py
+COPY --chown=frappe:frappe data/imports /home/frappe/frappe-bench/imports
 
 USER frappe
 WORKDIR /home/frappe/frappe-bench

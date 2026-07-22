@@ -484,8 +484,9 @@ def get_session(session_id: str):
 	)
 	for message in messages:
 		summary = _parse_json(message.get("tool_summary"), {})
-		# Only the forecast payloads matter to the client; keep the rest server-side.
+		# Only the card payloads matter to the client; keep the rest server-side.
 		message["forecasts"] = summary.get("forecasts") or []
+		message["comparisons"] = summary.get("comparisons") or []
 		message.pop("tool_summary", None)
 	actions = frappe.get_all(
 		"NextGen Chat Action",
@@ -603,7 +604,7 @@ def revise_action(action_id: str, changes=None):
 	updates = _parse_json(changes, {})
 	if not isinstance(updates, dict):
 		frappe.throw(_("Invalid preview changes"))
-	allowed_fields = {"warehouse", "supplier", "schedule_date"}
+	allowed_fields = {"warehouse", "supplier", "schedule_date", "items", "priority"}
 	if set(updates) - allowed_fields:
 		frappe.throw(_("Unsupported preview field"))
 	arguments = _parse_json(action.proposal_payload, {})
@@ -643,6 +644,59 @@ def revise_action(action_id: str, changes=None):
 		arguments["schedule_date"] = schedule_date
 
 	from nextgen_erp import procurement
+
+	if "priority" in updates:
+		priority = str(updates.get("priority") or "").strip().lower()
+		if priority not in procurement.PRIORITIES:
+			frappe.throw(_("Unsupported priority"))
+		arguments["priority"] = priority
+		# When the previous supplier was auto-selected and the buyer did not pin
+		# one now, let preparation re-pick the best supplier for the new priority.
+		if (
+			action.action_type == "prepare_purchase_order"
+			and "supplier" not in updates
+			and preview.get("supplier_auto_selected")
+		):
+			arguments.pop("supplier", None)
+
+	if "items" in updates:
+		requested_rows = updates.get("items")
+		if not isinstance(requested_rows, list) or not requested_rows:
+			frappe.throw(_("Invalid preview items"))
+		overrides: dict[str, dict] = {}
+		for row in requested_rows:
+			if not isinstance(row, dict) or not row.get("item_code"):
+				frappe.throw(_("Invalid preview items"))
+			overrides[str(row["item_code"])] = row
+		# Rebuild the proposal from the preview's already-resolved lines so the
+		# replacement re-resolves by exact item code, applying qty/rate edits.
+		new_items = []
+		for line in preview.get("items") or []:
+			override = overrides.pop(line.get("item_code"), {})
+			qty = flt(override.get("qty", line.get("qty")))
+			if qty <= 0:
+				frappe.throw(_("Quantity must be greater than zero for {0}").format(line.get("item_code")))
+			entry: dict = {"item": line.get("item_code"), "qty": qty, "uom": line.get("uom")}
+			if override.get("rate") is not None:
+				rate = flt(override.get("rate"))
+				if rate <= 0:
+					frappe.throw(_("Rate must be greater than zero for {0}").format(line.get("item_code")))
+				# The audited manual-rate path: preparation warns permanently and
+				# revalidation stops price-variance blocking for this line only.
+				entry.update({"rate": rate, "rate_overridden": True, "rate_override_by": user})
+			elif line.get("rate_overridden"):
+				# Carry an existing override forward unchanged.
+				entry.update(
+					{
+						"rate": flt(line.get("rate")),
+						"rate_overridden": True,
+						"rate_override_by": line.get("rate_override_by") or user,
+					}
+				)
+			new_items.append(entry)
+		if overrides:
+			frappe.throw(_("Unknown preview item: {0}").format(", ".join(overrides)))
+		arguments["items"] = new_items
 
 	if action.action_type == "prepare_purchase_order":
 		replacement = procurement._prepare_purchase_order(
@@ -731,6 +785,7 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 		action_ids: list[str] = []
 		tool_log: list[str] = []
 		forecasts: list[dict] = []
+		comparisons: list[dict] = []
 		final_text = ""
 		for _ in range(config["max_tool_calls"]):
 			response = client.chat(model=model, messages=messages, tools=agent_tools)
@@ -778,6 +833,10 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 				for card in forecast_cards:
 					forecasts.append(card)
 					_publish(user, turn_id, "forecast", forecast=card)
+				if result.get("comparison_card"):
+					card = {key: value for key, value in result.items() if key != "comparison_card"}
+					comparisons.append(card)
+					_publish(user, turn_id, "comparison", comparison=card)
 				_publish(user, turn_id, "tool", name=name)
 				messages.append(
 					{
@@ -820,6 +879,7 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 			tool_summary={
 				"tools": tool_log,
 				"forecasts": forecasts,
+				"comparisons": comparisons,
 				"latency_ms": round((time.monotonic() - started_at) * 1000),
 				"usage": client.usage,
 			},

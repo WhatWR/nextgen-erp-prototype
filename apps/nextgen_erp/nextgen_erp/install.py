@@ -62,6 +62,45 @@ def _ensure_backorder_default() -> None:
 		frappe.db.set_single_value("NextGen Automation Settings", "allow_backorder_invoicing", 1)
 
 
+def ensure_thai_tax_settings(company: str | None = None) -> None:
+	"""Keep GL posting working when erpnext_thailand is installed.
+
+	erpnext_thailand hooks GL Entry.after_insert and calls get_thai_tax_settings()
+	*before* checking the voucher type, so any GL-generating transaction (invoice,
+	payment, receipt) throws until the company has a Thai Tax Settings row. Wire
+	one to the company's existing Tax account so the base order-to-cash and
+	procurement flows keep working. No-op when the app is absent, the row already
+	exists, or no Tax account is configured. On a proper Thai chart of accounts,
+	point the four fields at the real output/input (and undue) VAT accounts.
+	"""
+	if not frappe.db.exists("DocType", "Thai Tax Settings"):
+		return
+	company = company or frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
+		"Global Defaults", "default_company"
+	)
+	if not company:
+		return
+	settings = frappe.get_single("Thai Tax Settings")
+	if any(row.company == company for row in settings.company_accounts):
+		return
+	tax_account = frappe.db.get_value(
+		"Account", {"company": company, "account_type": "Tax", "is_group": 0}, "name"
+	)
+	if not tax_account:
+		return
+	settings.append(
+		"company_accounts",
+		{
+			"company": company,
+			"sales_tax_account": tax_account,
+			"sales_tax_account_undue": tax_account,
+			"purchase_tax_account": tax_account,
+			"purchase_tax_account_undue": tax_account,
+		},
+	)
+	settings.save(ignore_permissions=True)
+
+
 def before_install() -> None:
 	_ensure_role()
 
@@ -70,6 +109,7 @@ def after_install() -> None:
 	_ensure_role()
 	_ensure_custom_fields()
 	_ensure_backorder_default()
+	ensure_thai_tax_settings()
 	from nextgen_erp.print_formats import ensure_print_formats
 
 	ensure_print_formats()
@@ -79,6 +119,7 @@ def after_migrate() -> None:
 	_ensure_role()
 	_ensure_custom_fields()
 	_ensure_backorder_default()
+	ensure_thai_tax_settings()
 	from nextgen_erp.print_formats import ensure_print_formats
 
 	ensure_print_formats()

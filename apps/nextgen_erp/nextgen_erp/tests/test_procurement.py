@@ -2,7 +2,7 @@ import json
 
 import frappe
 from frappe.tests import IntegrationTestCase
-from frappe.utils import add_days, add_to_date, now_datetime, nowdate
+from frappe.utils import add_days, add_to_date, flt, now_datetime, nowdate
 
 from nextgen_erp import demo, forecast, procurement, staff_chat
 
@@ -320,3 +320,153 @@ class IntegrationTestProcurementCopilot(IntegrationTestCase):
 				procurement.run_forecast_now()
 		finally:
 			frappe.set_user("Administrator")
+
+	# ------------------------------------------------------------------
+	# Vendor comparison + priority-aware ordering
+	# ------------------------------------------------------------------
+
+	def test_compare_suppliers_ranks_by_priority(self):
+		urgent = procurement._compare_suppliers("DRK-M150", "urgent")
+		best_price = procurement._compare_suppliers("DRK-M150", "best_price")
+		names = {row["supplier"] for row in urgent["suppliers"]}
+		self.assertIn(demo.SUPPLIER, names)
+		self.assertIn(demo.SUPPLIER2, names)
+		# โอสถสภา receives in ~2 days; สยามซัพพลาย is cheaper but takes 6-7 days.
+		self.assertEqual(urgent["recommended"]["supplier"], demo.SUPPLIER)
+		self.assertEqual(best_price["recommended"]["supplier"], demo.SUPPLIER2)
+		self.assertTrue(urgent["recommended"]["reason"])
+		self.assertTrue(urgent["comparison_card"])
+		fast = next(row for row in urgent["suppliers"] if row["supplier"] == demo.SUPPLIER)
+		slow = next(row for row in urgent["suppliers"] if row["supplier"] == demo.SUPPLIER2)
+		self.assertLess(fast["effective_lead_days"], slow["effective_lead_days"])
+		self.assertLess(slow["last_rate"], fast["last_rate"])
+		json.dumps(urgent, ensure_ascii=False, default=str)
+
+	def test_compare_suppliers_is_deterministic(self):
+		first = procurement._compare_suppliers("DRK-M150", "urgent")
+		second = procurement._compare_suppliers("DRK-M150", "urgent")
+		self.assertEqual(first, second)
+
+	def test_urgent_priority_auto_selects_fastest_supplier(self):
+		session = self._session()
+		result = procurement._prepare_purchase_order(
+			{"items": [{"item": "M-150", "qty": 10, "uom": "ลัง"}], "priority": "urgent"},
+			user="Administrator",
+			session_id=session.name,
+		)
+		preview = result["preview"]
+		self.assertEqual(preview["supplier"], demo.SUPPLIER)
+		self.assertTrue(preview["supplier_auto_selected"])
+		self.assertEqual(preview["priority"], "urgent")
+		self.assertTrue(preview["priority_note"])
+		# Urgent uses the supplier's measured lead (~2 days), not the item's 5.
+		self.assertEqual(preview["schedule_date"], str(add_days(nowdate(), 2)))
+
+	def test_best_price_priority_selects_cheapest_supplier(self):
+		session = self._session()
+		result = procurement._prepare_purchase_order(
+			{"items": [{"item": "M-150", "qty": 10, "uom": "ลัง"}], "priority": "best_price"},
+			user="Administrator",
+			session_id=session.name,
+		)
+		preview = result["preview"]
+		self.assertEqual(preview["supplier"], demo.SUPPLIER2)
+		self.assertTrue(preview["supplier_auto_selected"])
+
+	def test_priority_change_reranks_auto_selected_supplier(self):
+		session = self._session()
+		result = procurement._prepare_purchase_order(
+			{"items": [{"item": "M-150", "qty": 10, "uom": "ลัง"}], "priority": "urgent"},
+			user="Administrator",
+			session_id=session.name,
+		)
+		revised = staff_chat.revise_action(result["action_id"], {"priority": "best_price"})
+		self.assertEqual(revised["preview"]["supplier"], demo.SUPPLIER2)
+		self.assertEqual(revised["preview"]["priority"], "best_price")
+		self.assertEqual(
+			frappe.db.get_value("NextGen Chat Action", result["action_id"], "status"), "Cancelled"
+		)
+
+	def test_llm_supplied_rate_override_is_stripped(self):
+		session = self._session()
+		result = procurement.dispatch_tool(
+			"prepare_purchase_order",
+			{
+				"supplier": demo.SUPPLIER,
+				"items": [
+					{"item": "M-150", "qty": 5, "uom": "ลัง", "rate": 1, "rate_overridden": True}
+				],
+			},
+			user="Administrator",
+			session_id=session.name,
+		)
+		line = result["preview"]["items"][0]
+		self.assertFalse(line["rate_overridden"])
+		self.assertGreater(line["rate"], 1)
+
+	# ------------------------------------------------------------------
+	# In-chat editing (qty / rate / priority) without a new AI turn
+	# ------------------------------------------------------------------
+
+	def test_revise_action_updates_quantity(self):
+		result = self._prepare(qty=10)
+		revised = staff_chat.revise_action(
+			result["action_id"],
+			{"items": [{"item_code": "DRK-M150", "qty": 25}]},
+		)
+		line = revised["preview"]["items"][0]
+		self.assertEqual(line["qty"], 25)
+		self.assertAlmostEqual(revised["preview"]["total"], 25 * line["rate"], places=2)
+		self.assertEqual(
+			frappe.db.get_value("NextGen Chat Action", result["action_id"], "status"), "Cancelled"
+		)
+
+	def test_revise_action_rejects_bad_items(self):
+		result = self._prepare()
+		with self.assertRaises(frappe.ValidationError):
+			staff_chat.revise_action(
+				result["action_id"], {"items": [{"item_code": "DRK-M150", "qty": 0}]}
+			)
+		result = self._prepare()
+		with self.assertRaises(frappe.ValidationError):
+			staff_chat.revise_action(
+				result["action_id"], {"items": [{"item_code": "NO-SUCH-ITEM", "qty": 5}]}
+			)
+
+	def test_rate_override_is_audited_and_creates_draft_po(self):
+		result = self._prepare(qty=10)
+		revised = staff_chat.revise_action(
+			result["action_id"],
+			{"items": [{"item_code": "DRK-M150", "qty": 10, "rate": 500}]},
+		)
+		line = revised["preview"]["items"][0]
+		self.assertTrue(line["rate_overridden"])
+		self.assertEqual(line["rate"], 500)
+		self.assertEqual(line["rate_override_by"], "Administrator")
+		self.assertTrue(
+			any("กำหนดเองโดย Administrator" in warning for warning in revised["preview"]["warnings"])
+		)
+		# 500 is >10% off the system rate, but the override is the buyer's audited
+		# decision: confirmation must not be blocked by the variance guardrail.
+		outcome = staff_chat.confirm_action(revised["action_id"])
+		self.assertEqual(outcome["document_type"], "Purchase Order")
+		po_rate = frappe.db.get_value(
+			"Purchase Order Item", {"parent": outcome["document_name"]}, "rate"
+		)
+		self.assertEqual(flt(po_rate), 500)
+
+	def test_rate_override_still_respects_budget_guardrail(self):
+		frappe.db.set_single_value("NextGen Procurement Settings", "maximum_po_value", 1000)
+		result = self._prepare(qty=10)
+		revised = staff_chat.revise_action(
+			result["action_id"],
+			{"items": [{"item_code": "DRK-M150", "qty": 10, "rate": 500}]},
+		)
+		outcome = staff_chat.confirm_action(revised["action_id"])
+		self.assertEqual(outcome["document_type"], "NextGen Procurement Recommendation")
+		self.assertEqual(
+			frappe.db.get_value(
+				"NextGen Procurement Recommendation", outcome["document_name"], "status"
+			),
+			"Needs Review",
+		)

@@ -14,6 +14,8 @@ from frappe.utils import add_days, nowdate
 
 CUSTOMER = "ร้านเจริญพาณิชย์"
 SUPPLIER = "บจก.โอสถสภา"
+# Second M-150 source: cheaper but slower — powers the vendor-comparison demo.
+SUPPLIER2 = "หจก.สยามซัพพลาย"
 ITEMS = [
     {"item_code": "DRK-M150", "item_name": "เครื่องดื่ม M-150", "uom": "ลัง", "rate": 390, "aliases": ["M-150", "เอ็มร้อยห้าสิบ", "เอ็ม150"]},
     {"item_code": "NDL-MAMA-TOM", "item_name": "มาม่าต้มยำน้ำข้น", "uom": "แพ็ก", "rate": 72, "aliases": ["มาม่าต้มยำ", "มาม่า"]},
@@ -28,6 +30,11 @@ def run():
         _item(it)
     _stock()
     _stock_settings()
+    # When erpnext_thailand is installed its GL hook blocks every posting until
+    # the company has Thai Tax Settings; wire it up so the demo/tests can invoice.
+    from nextgen_erp.install import ensure_thai_tax_settings
+
+    ensure_thai_tax_settings()
     frappe.db.commit()
     return "ok"
 
@@ -132,16 +139,17 @@ def procurement():
 
 
 def _supplier():
-    if not frappe.db.exists("Supplier", SUPPLIER):
-        frappe.get_doc(
-            {
-                "doctype": "Supplier",
-                "supplier_name": SUPPLIER,
-                "supplier_type": "Company",
-                "supplier_group": frappe.db.get_value("Supplier Group", {"is_group": 0}, "name")
-                or "All Supplier Groups",
-            }
-        ).insert()
+    for name in (SUPPLIER, SUPPLIER2):
+        if not frappe.db.exists("Supplier", name):
+            frappe.get_doc(
+                {
+                    "doctype": "Supplier",
+                    "supplier_name": name,
+                    "supplier_type": "Company",
+                    "supplier_group": frappe.db.get_value("Supplier Group", {"is_group": 0}, "name")
+                    or "All Supplier Groups",
+                }
+            ).insert()
 
 
 def _supplier_terms():
@@ -162,6 +170,10 @@ def _supplier_terms():
         item.is_purchase_item = 1
         if not any(row.supplier == SUPPLIER for row in item.supplier_items or []):
             item.append("supplier_items", {"supplier": SUPPLIER})
+        if it is ITEMS[0] and not any(
+            row.supplier == SUPPLIER2 for row in item.supplier_items or []
+        ):
+            item.append("supplier_items", {"supplier": SUPPLIER2})
         item.save(ignore_permissions=True)
         if not frappe.db.exists(
             "Item Price",
@@ -209,7 +221,14 @@ def _demand_history():
 
 
 def _purchase_history():
-    """Two closed purchase lots with different rates plus one open PO."""
+    """Historical purchase lots from two suppliers plus one open PO.
+
+    Received lots get real backdated Purchase Receipts so the vendor
+    comparison can measure actual lead times: โอสถสภา delivers in ~2 days but
+    is pricier; สยามซัพพลาย is cheaper but takes 6-7 days (late vs the 5-day
+    schedule)."""
+    from erpnext.buying.doctype.purchase_order.purchase_order import make_purchase_receipt
+
     company = frappe.defaults.get_user_default("company") or frappe.db.get_single_value(
         "Global Defaults", "default_company"
     )
@@ -217,20 +236,22 @@ def _purchase_history():
         "Warehouse", {"company": company, "is_group": 0}, "name", order_by="creation asc"
     )
     lots = (
-        (add_days(nowdate(), -60), 335.0, 50, "Closed"),
-        (add_days(nowdate(), -12), 350.0, 50, "Closed"),
-        (add_days(nowdate(), -2), 352.0, 20, None),  # open, awaiting receipt
+        (SUPPLIER, add_days(nowdate(), -60), 335.0, 50, 2),
+        (SUPPLIER, add_days(nowdate(), -12), 350.0, 50, 2),
+        (SUPPLIER, add_days(nowdate(), -2), 352.0, 20, None),  # open, awaiting receipt
+        (SUPPLIER2, add_days(nowdate(), -45), 332.0, 50, 6),
+        (SUPPLIER2, add_days(nowdate(), -20), 340.0, 50, 7),
     )
-    for date, rate, qty, close in lots:
+    for supplier, date, rate, qty, receipt_delay in lots:
         if frappe.db.exists(
             "Purchase Order",
-            {"supplier": SUPPLIER, "transaction_date": date, "docstatus": 1},
+            {"supplier": supplier, "transaction_date": date, "docstatus": 1},
         ):
             continue
         po = frappe.get_doc(
             {
                 "doctype": "Purchase Order",
-                "supplier": SUPPLIER,
+                "supplier": supplier,
                 "company": company,
                 "transaction_date": date,
                 "schedule_date": add_days(date, 5),
@@ -248,8 +269,12 @@ def _purchase_history():
         )
         po.insert(ignore_permissions=True)
         po.submit()
-        if close:
-            po.update_status(close)
+        if receipt_delay is not None:
+            receipt = make_purchase_receipt(po.name)
+            receipt.set_posting_time = 1
+            receipt.posting_date = add_days(date, receipt_delay)
+            receipt.insert(ignore_permissions=True)
+            receipt.submit()
 
 
 def smoke():
