@@ -3,6 +3,8 @@ import frappe
 from nextgen_erp.api import make_invoice_download_url, make_promptpay_qr_url
 from nextgen_erp.webshop import _current_shop_session
 
+no_cache = 1
+
 
 def get_context(context):
 	if frappe.session.user == "Guest":

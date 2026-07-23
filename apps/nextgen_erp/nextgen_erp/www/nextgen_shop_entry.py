@@ -3,6 +3,8 @@ from frappe.utils import get_datetime, now_datetime
 
 from nextgen_erp.webshop import _token_hash
 
+no_cache = 1
+
 
 def get_context(context):
 	token = (frappe.form_dict.get("token") or "").strip()
