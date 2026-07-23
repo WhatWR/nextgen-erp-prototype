@@ -1,0 +1,29 @@
+{% extends "templates/web.html" %}
+
+{% block page_content %}
+<div class="container py-5" style="max-width: 560px">
+	<div class="card shadow-sm">
+		<div class="card-body p-4 text-center">
+			{% if link_is_valid %}
+			<h2 class="mb-3">แคตตาล็อกสินค้า NextGen</h2>
+			<p class="text-muted mb-4">
+				กดปุ่มด้านล่างเพื่อเข้าสู่แคตตาล็อกและสั่งซื้อด้วยบัญชี LINE ของคุณ
+			</p>
+			<form method="post" action="/api/method/nextgen_erp.webshop.open_line_shop">
+				<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+				<input type="hidden" name="token" value="{{ token }}">
+				<button class="btn btn-primary btn-lg w-100" type="submit">
+					ดูสินค้า / สั่งซื้อ
+				</button>
+			</form>
+			<p class="small text-muted mt-3 mb-0">ลิงก์นี้ใช้ได้ครั้งเดียวและมีอายุ 10 นาที</p>
+			{% else %}
+			<h2 class="mb-3">ลิงก์หมดอายุแล้ว</h2>
+			<p class="text-muted mb-0">
+				กรุณากลับไปที่ LINE แล้วส่งข้อความ “สินค้ามีอะไรบ้าง” เพื่อรับลิงก์ใหม่
+			</p>
+			{% endif %}
+		</div>
+	</div>
+</div>
+{% endblock %}

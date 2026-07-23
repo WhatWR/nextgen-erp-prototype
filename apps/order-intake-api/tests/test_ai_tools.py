@@ -162,6 +162,40 @@ class CatalogToolTest(unittest.TestCase):
         result = dispatch(build_tools(make_ctx(client)), "get_item_info", {"query": ""})
         self.assertEqual(result["items"][0]["item_code"], "DRK-M150")
 
+    def test_generic_catalog_only_recommends_three_priced_in_stock_products(self):
+        rows = [
+            {
+                "item_code": f"ITEM-{index}",
+                "item_name": f"Item {index}",
+                "stock_uom": "Nos",
+                "price": price,
+                "projected_qty": stock,
+                "aliases": [],
+            }
+            for index, price, stock in [
+                (1, 100, 10),
+                (2, 200, 20),
+                (3, 300, 30),
+                (4, 400, 40),
+                (5, 0, 50),
+                (6, 600, 0),
+            ]
+        ]
+        client = FakeClient(
+            {
+                "nextgen_erp.api.get_catalog": [
+                    {"data": rows, "has_more": False, "next_start": len(rows)}
+                ]
+            }
+        )
+        result = dispatch(build_tools(make_ctx(client)), "get_item_info", {"query": ""})
+        self.assertEqual(len(result["items"]), 3)
+        self.assertEqual(
+            [item["item_code"] for item in result["items"]],
+            ["ITEM-4", "ITEM-3", "ITEM-2"],
+        )
+        self.assertEqual(result["catalog_count"], 4)
+
     def test_price_words_are_removed_before_item_matching(self):
         client = FakeClient(
             {

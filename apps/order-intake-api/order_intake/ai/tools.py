@@ -20,7 +20,7 @@ from .rag import KnowledgeIndex, _ngrams
 CATALOG_PAGE_SIZE = 500
 CATALOG_MAX_PAGES = 2
 ITEM_RESULT_LIMIT = 8
-GENERIC_RECOMMENDATION_LIMIT = 5
+GENERIC_RECOMMENDATION_LIMIT = 3
 CONFIRM_EVENT_SUFFIX = ":ai-confirm"
 
 _CATALOG_QUERY_WORDS = (
@@ -120,9 +120,19 @@ def build_tools(ctx: ToolContext) -> dict[str, ToolSpec]:
         else:
             # A generic question such as "มีสินค้าอะไรบ้าง" should list the
             # live catalog, not return an empty result because there is no SKU
-            # term to rank. Prefer items that are actually available.
+            # term to rank. "พร้อมขาย" means the live ERP price is positive
+            # and, when a warehouse is configured, projected stock is positive.
+            saleable_rows = [
+                row
+                for row in rows
+                if float(row.get("price") or 0) > 0
+                and (
+                    row.get("projected_qty") is None
+                    or float(row.get("projected_qty") or 0) > 0
+                )
+            ]
             matches = sorted(
-                rows,
+                saleable_rows,
                 key=lambda row: (
                     row.get("projected_qty") is None,
                     -(float(row.get("projected_qty") or 0)),
@@ -142,7 +152,7 @@ def build_tools(ctx: ToolContext) -> dict[str, ToolSpec]:
                 }
                 for row in matches
             ],
-            "catalog_count": len(rows),
+            "catalog_count": len(rows) if cleaned_query else len(saleable_rows),
             "query": cleaned_query,
             "source": "ERPNext Item + Item Price + Bin",
         }

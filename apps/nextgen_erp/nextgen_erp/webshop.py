@@ -106,7 +106,7 @@ def create_line_shop_link(
 		}
 	).insert(ignore_permissions=True)
 	url = (
-		f"{public_base_url()}/api/method/nextgen_erp.webshop.open_line_shop"
+		f"{public_base_url()}/nextgen-shop-entry"
 		f"?token={quote(token)}"
 	)
 	return {"url": url, "expires_at": str(expires_at)}
@@ -114,7 +114,19 @@ def create_line_shop_link(
 
 @frappe.whitelist(allow_guest=True)
 def open_line_shop(token: str):
-	"""Consume a handoff, establish a Website User session, and open the catalog."""
+	"""Consume a handoff after an explicit POST and open the catalog.
+
+	LINE and other chat clients may fetch links to build previews.  A GET must
+	therefore never consume the one-use token or establish a customer session.
+	Older links that still target this method are redirected to the safe landing
+	page and remain usable.
+	"""
+	request = getattr(frappe.local, "request", None)
+	if str(getattr(request, "method", "GET")).upper() != "POST":
+		frappe.local.response.type = "redirect"
+		frappe.local.response.location = f"/nextgen-shop-entry?token={quote(token or '')}"
+		return None
+
 	token_hash = _token_hash(token or "")
 	name = frappe.db.get_value("NextGen Shop Session", {"token_hash": token_hash}, "name")
 	if not name:
