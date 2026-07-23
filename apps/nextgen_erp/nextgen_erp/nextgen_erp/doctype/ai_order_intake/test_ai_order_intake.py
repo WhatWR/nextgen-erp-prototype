@@ -124,6 +124,59 @@ class IntegrationTestAIOrderIntake(IntegrationTestCase):
 		self.assertNotIn("None", message)
 		self.assertIn("สินค้าที่ไม่รู้จัก", message)
 
+	def test_promptpay_message_is_truthful_when_promptpay_is_missing(self):
+		settings = frappe.get_single("NextGen Payment Settings")
+		previous = settings.promptpay_id
+		settings.promptpay_id = ""
+		settings.save(ignore_permissions=True)
+		try:
+			doc = frappe._dict(
+				name="AIO-TEST",
+				status="Awaiting Payment",
+				sales_invoice="",
+				line_ref="U-test",
+				total=100,
+				items=[],
+			)
+			message = api._line_message(doc)
+			self.assertNotIn("กรุณาชำระผ่าน QR", message)
+			self.assertIn("ยังไม่ได้ตั้งค่า PromptPay", message)
+		finally:
+			settings.promptpay_id = previous
+			settings.save(ignore_permissions=True)
+
+	def test_slip_ocr_is_extraction_only_and_flags_mismatches(self):
+		doc = frappe._dict(name="AIO-TEST", total=15500)
+		settings = frappe._dict(
+			promptpay_name="บริษัท เน็กซ์เจน จำกัด",
+			slip_confidence_threshold=0.95,
+		)
+		raw = """
+		จำนวนเงิน: 15,400.00 บาท
+		เลขที่รายการ: TXNABC123456
+		วันที่และเวลา: 23/07/2026 12:10
+		จาก: นายทดสอบ
+		ไปยัง: ร้านอื่น
+		"""
+		with patch.object(frappe.db, "exists", return_value=False):
+			result = api._parse_slip_ocr(raw, doc, settings)
+		self.assertFalse(result["verified"])
+		self.assertFalse(result["amount_matches"])
+		self.assertFalse(result["recipient_matches"])
+		self.assertIn("amount_mismatch", result["flags"])
+		self.assertIn("recipient_mismatch", result["flags"])
+
+	def test_promptpay_payload_contains_locked_amount_and_valid_crc(self):
+		payload = api._promptpay_payload("0812345678", 15500)
+		self.assertIn("540815500.00", payload)
+		body, supplied_crc = payload[:-4], payload[-4:]
+		crc = 0xFFFF
+		for byte in body.encode("ascii"):
+			crc ^= byte << 8
+			for _ in range(8):
+				crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+		self.assertEqual(supplied_crc, f"{crc:04X}")
+
 	def test_atomic_order_to_cash_creates_submitted_erpnext_documents(self):
 		created = api.create_ai_order_intake(
 			self._payload(f"test-{frappe.generate_hash(length=10)}")

@@ -3,14 +3,24 @@
  "doctype": "DocType",
  "engine": "InnoDB",
  "field_order": [
+  "public_base_url",
   "promptpay_id",
   "promptpay_name",
   "delivery_team_line_id",
+  "slip_verification_mode",
   "slip_verification_url",
   "slip_verification_api_key",
-  "slip_confidence_threshold"
+  "slip_ocr_model",
+  "slip_confidence_threshold",
+  "slip_retention_days"
  ],
  "fields": [
+  {
+   "description": "Stable external HTTPS origin used for catalog, invoice, QR, and delivery links",
+   "fieldname": "public_base_url",
+   "fieldtype": "Data",
+   "label": "Public Base URL"
+  },
   {
    "description": "Phone, national/tax ID, or e-wallet ID used to generate amount-locked QR codes",
    "fieldname": "promptpay_id",
@@ -28,20 +38,41 @@
    "label": "Delivery Team LINE User/Group ID"
   },
   {
+   "default": "OCR Review",
+   "description": "OCR extracts data only. A staff member must approve every payment.",
+   "fieldname": "slip_verification_mode",
+   "fieldtype": "Select",
+   "label": "Slip Verification Mode",
+   "options": "OCR Review"
+  },
+  {
    "fieldname": "slip_verification_url",
    "fieldtype": "Data",
-   "label": "AI Slip Verification URL"
+   "label": "Typhoon OCR Base URL"
   },
   {
    "fieldname": "slip_verification_api_key",
    "fieldtype": "Password",
-   "label": "AI Slip Verification API Key"
+   "label": "Typhoon OCR API Key"
+  },
+  {
+   "default": "typhoon-ocr",
+   "fieldname": "slip_ocr_model",
+   "fieldtype": "Data",
+   "label": "Typhoon OCR Model"
   },
   {
    "default": "0.95",
    "fieldname": "slip_confidence_threshold",
    "fieldtype": "Float",
-   "label": "Slip Auto-approval Confidence"
+   "label": "OCR Review Confidence Threshold"
+  },
+  {
+   "default": "365",
+   "description": "Delete private slip images for completed/rejected orders after this many days; structured audit data is retained",
+   "fieldname": "slip_retention_days",
+   "fieldtype": "Int",
+   "label": "Private Slip Retention (Days)"
   }
  ],
  "issingle": 1,

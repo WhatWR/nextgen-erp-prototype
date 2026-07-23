@@ -52,14 +52,48 @@ frappe.ui.form.on("AI Order Intake", {
 		}
 
 		if (status === "Payment Review") {
+			let extraction = {};
+			try {
+				extraction = JSON.parse(frm.doc.payment_extraction_json || "{}");
+			} catch (_error) {
+				extraction = {};
+			}
+			const flags = (extraction.flags || []).join(", ") || __("None");
+			const amount = extraction.amount == null ? __("Not found") : format_currency(extraction.amount, "THB");
+			const recipient = extraction.recipient || __("Not found");
+			frm.set_intro(
+				__(
+					"OCR extracted amount: {0}; recipient: {1}; warnings: {2}. Compare with bank activity before approval.",
+					[
+						frappe.utils.escape_html(String(amount)),
+						frappe.utils.escape_html(String(recipient)),
+						frappe.utils.escape_html(String(flags)),
+					],
+				),
+				"orange",
+			);
 			frm.add_custom_button(__("Approve Payment Slip"), () => {
 				frappe.prompt(
-					[{ fieldname: "reference_no", label: __("Bank Reference"), fieldtype: "Data", reqd: 1 }],
+					[{
+						fieldname: "reference_no",
+						label: __("Bank Reference"),
+						fieldtype: "Data",
+						reqd: 1,
+						default: frm.doc.payment_reference || "",
+					}],
 					(v) => call("approve_payment_slip", { name: frm.doc.name, reference_no: v.reference_no }, __("Approving payment...")),
 					__("Approve Payment Slip"),
 					__("Submit"),
 				);
 			}).addClass("btn-primary");
+			frm.add_custom_button(__("Reject Slip"), () => {
+				frappe.prompt(
+					[{ fieldname: "note", label: __("Reason"), fieldtype: "Small Text", reqd: 1 }],
+					(v) => call("reject_payment_slip", { name: frm.doc.name, note: v.note }, __("Rejecting slip...")),
+					__("Reject Payment Slip"),
+					__("Submit"),
+				);
+			});
 		}
 
 		if (status === "Ready for Delivery") {

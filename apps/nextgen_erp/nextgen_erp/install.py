@@ -30,6 +30,18 @@ def _ensure_custom_fields() -> None:
 			"Delivery Note": [dict(reference_field)],
 			"Sales Invoice": [dict(reference_field)],
 			"Payment Entry": [dict(reference_field)],
+			"Quotation": [
+				{
+					"fieldname": "custom_nextgen_checkout_reference",
+					"label": "NextGen Checkout Reference",
+					"fieldtype": "Link",
+					"options": "AI Order Intake",
+					"unique": 1,
+					"no_copy": 1,
+					"read_only": 1,
+					"hidden": 1,
+				}
+			],
 			"Item": [
 				{
 					"fieldname": "custom_nextgen_aliases",
@@ -42,6 +54,36 @@ def _ensure_custom_fields() -> None:
 		},
 		update=True,
 	)
+
+
+def _ensure_webshop_defaults() -> None:
+	"""Enable catalog/cart defaults without enabling Webshop's separate payment checkout."""
+	if not frappe.db.exists("DocType", "Webshop Settings"):
+		return
+	settings = frappe.get_single("Webshop Settings")
+	company = settings.company or frappe.defaults.get_user_default(
+		"company"
+	) or frappe.db.get_single_value("Global Defaults", "default_company")
+	price_list = settings.price_list or frappe.db.get_single_value(
+		"Selling Settings", "selling_price_list"
+	)
+	customer_group = settings.default_customer_group or frappe.db.get_value(
+		"Customer Group", {"is_group": 0}, "name", order_by="creation asc"
+	)
+	if not (company and price_list and customer_group):
+		return
+	settings.company = company
+	settings.price_list = price_list
+	settings.default_customer_group = customer_group
+	settings.enabled = 1
+	settings.show_price = 1
+	settings.show_stock_availability = 1
+	settings.show_quantity_in_website = 1
+	# NextGen owns checkout/payment. Keep native payment checkout disabled; the
+	# web bundle replaces Request for Quote with the idempotent NextGen action.
+	settings.enable_checkout = 0
+	settings.save_quotations_as_draft = 1
+	settings.save(ignore_permissions=True)
 
 
 def _ensure_backorder_default() -> None:
@@ -110,6 +152,7 @@ def after_install() -> None:
 	_ensure_custom_fields()
 	_ensure_backorder_default()
 	ensure_thai_tax_settings()
+	_ensure_webshop_defaults()
 	from nextgen_erp.print_formats import ensure_print_formats
 
 	ensure_print_formats()
@@ -120,6 +163,7 @@ def after_migrate() -> None:
 	_ensure_custom_fields()
 	_ensure_backorder_default()
 	ensure_thai_tax_settings()
+	_ensure_webshop_defaults()
 	from nextgen_erp.print_formats import ensure_print_formats
 
 	ensure_print_formats()

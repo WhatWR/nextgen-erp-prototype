@@ -171,15 +171,46 @@ class AIAssistant:
             f"รูปแบบ: สินค้า + จำนวน + หน่วย\n"
             f"ตัวอย่าง: “{example_product} 2 {example_uom}”"
         )
+        catalog_url = ""
+        try:
+            handoff = self.client.call_method(
+                "nextgen_erp.webshop.create_line_shop_link",
+                line_id=line_id,
+                event_id=event_id,
+                target_route=str(example_item.get("route") or "") if query else "",
+            )
+            catalog_url = str((handoff or {}).get("url") or "")
+            if catalog_url:
+                actions.append("create_line_shop_link")
+        except ERPNextError:
+            # Catalog facts are still useful if the public shop is temporarily
+            # unavailable; never replace them with an AI fallback.
+            catalog_url = ""
         if query:
-            return "ข้อมูลจาก ERP ล่าสุดค่ะ\n\n" + "\n".join(lines) + f"\n\nสั่งซื้อได้เลยค่ะ\n{order_hint}"
+            browse = (
+                f"\n\nดูสินค้า/สั่งซื้อบนเว็บไซต์: {catalog_url}"
+                if catalog_url
+                else ""
+            )
+            return (
+                "ข้อมูลจาก ERP ล่าสุดค่ะ\n\n"
+                + "\n".join(lines)
+                + browse
+                + f"\n\nสั่งซื้อใน LINE ได้เลยค่ะ\n{order_hint}"
+            )
         suffix = (
             f"\n\nสั่งง่าย ๆ ในข้อความเดียวค่ะ\n{order_hint}\n"
             "จากนั้นระบบจะส่งสรุปออเดอร์ให้ตรวจและยืนยันก่อนชำระเงินค่ะ"
         )
         total = int(result.get("catalog_count") or len(items))
         count_note = f" (แสดง {len(items)} จาก {total} รายการ)" if total > len(items) else ""
-        return f"สินค้าแนะนำที่พร้อมขายจาก ERP{count_note}ค่ะ\n\n" + "\n".join(lines) + suffix
+        browse = f"\n\nดูสินค้าทั้งหมด / สั่งซื้อ: {catalog_url}" if catalog_url else ""
+        return (
+            f"สินค้าแนะนำที่พร้อมขายจาก ERP{count_note}ค่ะ\n\n"
+            + "\n".join(lines)
+            + browse
+            + suffix
+        )
 
     # ------------------------------------------------------------------ #
     def _run_loop(

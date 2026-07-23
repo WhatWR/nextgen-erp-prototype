@@ -43,7 +43,7 @@ example `SERVER_ENV_FILE=.env.staging docker compose up -d`.
 Open `http://127.0.0.1:8180` and sign in as `Administrator` using the password
 from `.env.server`.
 
-## Temporary public URL with ngrok
+## Temporary public URL with ngrok (development only)
 
 Keep ngrok running on the same server and tunnel the local gateway:
 
@@ -52,15 +52,25 @@ ngrok http 8180
 ```
 
 Use the generated HTTPS URL for browser access and append `/webhooks/line` for
-the LINE webhook. When ngrok gives you a new URL, update ERPNext's public URL:
+the LINE webhook. Set these pilot values in `.env.server`:
+
+```env
+PUBLIC_URL=https://YOUR-NGROK-HOST.ngrok-free.dev
+ALLOW_TEMPORARY_PUBLIC_URL=1
+ERP_DOMAIN=
+ACME_EMAIL=
+```
+
+When ngrok gives you a new URL, update `.env.server` and apply it:
 
 ```bash
-docker compose exec backend bench --site YOUR_SITE_NAME \
-  set-config host_name https://YOUR-NGROK-HOST.ngrok-free.app
+docker compose up -d --build --force-recreate create-site
+docker compose up -d
 ```
 
 The gateway sends `/webhooks/line` to Order Intake and all other requests to
-ERPNext, so one ngrok tunnel is enough.
+ERPNext, so one ngrok tunnel is enough. Customer links reject localhost and
+reject ngrok unless `ALLOW_TEMPORARY_PUBLIC_URL=1` is explicitly enabled.
 
 ## Production domain and HTTPS
 
@@ -69,6 +79,15 @@ After DNS is available, set `ERP_DOMAIN`, `ACME_EMAIL`, and `PUBLIC_URL` in
 
 ```bash
 docker compose --profile production up -d
+```
+
+Set the same origin in **Order Agent → Payment Settings → Public Base URL**.
+Then verify the deployment:
+
+```bash
+bash scripts/verify-public-flow.sh "https://$ERP_DOMAIN"
+docker compose exec backend bench --site "$SITE_NAME" execute \
+  nextgen_erp.webshop.catalog_readiness
 ```
 
 ## Complete the integration
@@ -98,9 +117,23 @@ docker compose --profile production up -d
    automatic routing policy and invoice-link lifetime. The internal service URL
    and key were already set by the bootstrap helper.
 4. Open **LINE Channel Settings**, enter the LINE channel secret/access token,
-   and use `YOUR_PUBLIC_URL/webhooks/line` as the LINE webhook URL. During the
-   pilot, `YOUR_PUBLIC_URL` is the HTTPS URL displayed by ngrok.
+   and use `YOUR_PUBLIC_URL/webhooks/line` as the LINE webhook URL.
 5. Create the required **LINE Customer Map** records.
+
+## Publish the product catalog
+
+The image includes the pinned Payments and Webshop v16 apps. After migration,
+preview eligible priced sales items:
+
+```bash
+docker compose exec backend bench --site "$SITE_NAME" execute \
+  nextgen_erp.webshop.publish_catalog_items \
+  --kwargs '{"dry_run":1,"limit":100}'
+```
+
+Run the same command with `"dry_run":0` after reviewing the counts. Continue
+with the returned `next_start_after` value. Only enabled sales items with a
+positive price in the configured selling price list are published.
 
 Do not enable `ENABLE_LEGACY_PROTOTYPE` on the server.
 

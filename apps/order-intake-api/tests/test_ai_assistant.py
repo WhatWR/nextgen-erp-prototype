@@ -20,6 +20,8 @@ class FakeClient:
     def call_method(self, method, **kwargs):
         self.calls.append((method, kwargs))
         values = self.replies.get(method)
+        if not values and method == "nextgen_erp.webshop.create_line_shop_link":
+            return {"url": "https://shop.example.test/catalog", "expires_at": "2099-01-01"}
         if not values:
             raise AssertionError(f"unexpected call: {method}")
         value = values.pop(0)
@@ -120,7 +122,7 @@ class AIAssistantTest(unittest.TestCase):
             line_id="U-new", text="มีสินค้าอะไรบ้างครับ", event_id="evt-catalog", customer=None
         )
         self.assertTrue(result["answered"])
-        self.assertEqual(result["actions"], ["get_item_info"])
+        self.assertEqual(result["actions"], ["get_item_info", "create_line_shop_link"])
         self.assertEqual(transport.requests, [])
         sent = [c for c in erp.calls if c[0] == "nextgen_erp.ai.send_line_answer"][0][1]["text"]
         self.assertIn("M-150", sent)
@@ -128,6 +130,7 @@ class AIAssistantTest(unittest.TestCase):
         self.assertIn("สินค้าแนะนำที่พร้อมขายจาก ERP", sent)
         self.assertIn("รูปแบบ: สินค้า + จำนวน + หน่วย", sent)
         self.assertIn("DRK-M150 2 ลัง", sent)
+        self.assertIn("https://shop.example.test/catalog", sent)
         self.assertNotIn("ลงทะเบียน", sent)
 
     def test_thai_product_first_catalog_question_never_reaches_the_model(self):
@@ -145,7 +148,7 @@ class AIAssistantTest(unittest.TestCase):
             line_id="U-new", text="สินค้ามีอะไรบ้าง", event_id="evt-product-first"
         )
         self.assertTrue(result["answered"])
-        self.assertEqual(result["actions"], ["get_item_info"])
+        self.assertEqual(result["actions"], ["get_item_info", "create_line_shop_link"])
         self.assertEqual(transport.requests, [])
         sent = [c for c in erp.calls if c[0] == "nextgen_erp.ai.send_line_answer"][0][1]["text"]
         self.assertIn("DRK-M150 2 ลัง", sent)
@@ -164,7 +167,7 @@ class AIAssistantTest(unittest.TestCase):
         result = assistant.answer(line_id="U123", text="M-150 ราคาเท่าไหร่", event_id="evt-1")
         self.assertEqual(result["kind"], "ai_answer")
         self.assertTrue(result["answered"])
-        self.assertEqual(result["actions"], ["get_item_info"])
+        self.assertEqual(result["actions"], ["get_item_info", "create_line_shop_link"])
         self.assertEqual(transport.requests, [])
         send = [c for c in erp.calls if c[0] == "nextgen_erp.ai.send_line_answer"][0]
         self.assertIn("390", send[1]["text"])

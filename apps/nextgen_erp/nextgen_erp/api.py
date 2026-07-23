@@ -22,18 +22,24 @@ import hashlib
 import hmac
 import io
 import json
+import re
+import tempfile
 import time
 from urllib.parse import quote, urlparse
 
 import frappe
 import requests
 from frappe import _
-from frappe.utils import flt, get_url, nowdate
+from frappe.utils import flt, getdate, get_url, now_datetime, nowdate
 
 
 SERVICE_ROLE = "NextGen Order Service"
 OPERATIONS_ROLES = {"System Manager", "Sales Manager", "Sales User", SERVICE_ROLE}
 EXTERNAL_REFERENCE_FIELD = "custom_nextgen_external_reference"
+
+
+def _trusted_web_checkout() -> bool:
+    return bool(getattr(frappe.local.flags, "nextgen_web_checkout", False))
 
 
 @frappe.whitelist()
@@ -282,6 +288,8 @@ def _select_sales_fulfilment(
 
 
 def _require_any_role(allowed: set[str]) -> None:
+    if _trusted_web_checkout():
+        return
     if frappe.session.user == "Administrator":
         return
     roles = set(frappe.get_roles(frappe.session.user))
@@ -336,14 +344,20 @@ def _selling_rate(item_code: str, customer: str, price_list: str | None = None) 
     price_list = price_list or frappe.db.get_value("Customer", customer, "default_price_list")
     price_list = price_list or frappe.db.get_single_value("Selling Settings", "selling_price_list")
     if price_list:
-        rate = frappe.db.get_value(
+        candidates = frappe.get_all(
             "Item Price",
-            {"item_code": item_code, "price_list": price_list, "selling": 1},
-            "price_list_rate",
+            filters={"item_code": item_code, "price_list": price_list, "selling": 1},
+            fields=["price_list_rate", "valid_from", "valid_upto"],
             order_by="valid_from desc, modified desc",
+            limit_page_length=20,
         )
-        if rate is not None:
-            return flt(rate)
+        today = getdate(nowdate())
+        for price in candidates:
+            if price.valid_from and getdate(price.valid_from) > today:
+                continue
+            if price.valid_upto and getdate(price.valid_upto) < today:
+                continue
+            return flt(price.price_list_rate)
     return flt(frappe.db.get_value("Item", item_code, "standard_rate"))
 
 
@@ -460,22 +474,36 @@ def _line_message(doc) -> str:
     if doc.status == "Reserved":
         return f"ยืนยันออเดอร์ {doc.name} แล้ว สินค้าถูกจองและกำลังสร้างใบแจ้งหนี้ค่ะ"
     if doc.status == "Awaiting Payment":
-        link = make_invoice_download_url(doc.sales_invoice, doc.line_ref) if doc.sales_invoice else ""
+        link = _safe_invoice_download_url(doc.sales_invoice, doc.line_ref) if doc.sales_invoice else ""
         settings = frappe.get_single("NextGen Payment Settings")
-        promptpay = f" PromptPay: {settings.promptpay_id}" if settings.promptpay_id else ""
+        if settings.promptpay_id:
+            promptpay = f" PromptPay: {settings.promptpay_id}"
+            payment_instruction = "กรุณาสแกน QR และแนบรูปสลิปในแชตนี้ค่ะ"
+        else:
+            promptpay = ""
+            payment_instruction = (
+                "ยังไม่สามารถแสดง QR ได้ เนื่องจากร้านค้ายังไม่ได้ตั้งค่า PromptPay "
+                "กรุณารอเจ้าหน้าที่แจ้งช่องทางชำระเงินค่ะ"
+            )
+        if getattr(doc, "payment_verification_status", "") == "Rejected":
+            payment_instruction = (
+                "สลิปก่อนหน้ายังไม่ผ่านการตรวจสอบ "
+                f"{payment_instruction}"
+            )
+        invoice_line = link or "ลิงก์ใบแจ้งหนี้ยังไม่พร้อม กรุณาติดต่อเจ้าหน้าที่เพื่อขอส่งใหม่ค่ะ"
         return (
             f"ยืนยันออเดอร์ {doc.name} แล้ว ใบแจ้งหนี้ {doc.sales_invoice} "
-            f"ยอด {doc.total:,.2f} บาท{promptpay}\n{link}\n"
-            "กรุณาชำระผ่าน QR และแนบรูปสลิปในแชตนี้ค่ะ"
+            f"ยอด {doc.total:,.2f} บาท{promptpay}\n{invoice_line}\n"
+            f"{payment_instruction}"
         ).strip()
     if doc.status == "Payment Review":
-        return f"ได้รับสลิปสำหรับออเดอร์ {doc.name} แล้ว ระบบกำลังตรวจสอบการชำระเงินค่ะ"
+        return f"ได้รับสลิปสำหรับออเดอร์ {doc.name} แล้ว เจ้าหน้าที่กำลังตรวจสอบการชำระเงินค่ะ"
     if doc.status == "Ready for Delivery":
         return f"ตรวจสอบการชำระเงินออเดอร์ {doc.name} สำเร็จแล้ว กำลังส่งสินค้าให้ทีมจัดส่งค่ะ"
     if doc.status == "Delivered":
         return f"จัดส่งออเดอร์ {doc.name} เรียบร้อยแล้ว ขอบคุณที่ใช้บริการค่ะ"
     if doc.status == "Paid":
-        link = make_invoice_download_url(doc.sales_invoice, doc.line_ref) if doc.sales_invoice else ""
+        link = _safe_invoice_download_url(doc.sales_invoice, doc.line_ref) if doc.sales_invoice else ""
         return f"ได้รับชำระเงินออเดอร์ {doc.name} แล้ว ขอบคุณค่ะ ใบเสร็จ/ใบแจ้งหนี้: {link}".strip()
     if doc.status == "Rejected":
         return f"ยกเลิกออเดอร์ {doc.name} แล้วค่ะ"
@@ -483,11 +511,19 @@ def _line_message(doc) -> str:
 
 
 def _queue_line_notification(doc) -> None:
+    if getattr(frappe.local.flags, "nextgen_suppress_line_notification", False):
+        return
     if not doc.line_ref:
         return
     image_url = None
     if doc.status == "Awaiting Payment" and doc.sales_invoice:
-        image_url = make_promptpay_qr_url(doc.sales_invoice, doc.line_ref)
+        try:
+            image_url = make_promptpay_qr_url(doc.sales_invoice, doc.line_ref)
+        except ValueError:
+            frappe.log_error(
+                "Cannot create public PromptPay QR URL; check NextGen Payment Settings Public Base URL",
+                "NextGen public URL unavailable",
+            )
     frappe.enqueue(
         "nextgen_erp.line.push_text",
         queue="short",
@@ -1174,41 +1210,111 @@ def handle_line_reply(line_id: str, text: str, event_id: str | None = None):
     return response
 
 
-def _verify_payment_slip(content: bytes, doc) -> dict:
-    """Call the configured AI slip adapter; never infer payment from an image alone."""
-    settings = frappe.get_single("NextGen Payment Settings")
-    url = (settings.slip_verification_url or "").strip()
-    if not url:
-        return {"verified": False, "confidence": 0, "reason": "verifier_not_configured"}
-    headers = {"Content-Type": "application/json"}
-    token = settings.get_password("slip_verification_api_key", raise_exception=False) or ""
-    if token:
-        headers["Authorization"] = f"Bearer {token}"
-    response = requests.post(
-        url,
-        headers=headers,
-        json={
-            "image_base64": base64.b64encode(content).decode(),
-            "expected_amount": flt(doc.total),
-            "currency": "THB",
-            "invoice": doc.sales_invoice,
-            "customer": doc.customer,
-        },
-        timeout=30,
+def _first_match(patterns: list[str], text: str) -> str:
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE | re.MULTILINE)
+        if match:
+            return " ".join(match.group(1).strip().split())
+    return ""
+
+
+def _duplicate_payment_reference(reference_no: str, current_intake: str) -> str | None:
+    if not reference_no:
+        return None
+    intake = frappe.db.exists(
+        "AI Order Intake",
+        {"payment_reference": reference_no, "name": ["!=", current_intake]},
     )
-    response.raise_for_status()
-    result = response.json()
-    confidence = flt(result.get("confidence"))
-    amount = flt(result.get("amount"))
-    threshold = flt(settings.slip_confidence_threshold or 0.95)
-    amount_matches = abs(amount - flt(doc.total)) <= 0.01
+    if intake:
+        return f"AI Order Intake {intake}"
+    payment = frappe.db.exists(
+        "Payment Entry",
+        {"reference_no": reference_no, "docstatus": ["<", 2]},
+    )
+    return f"Payment Entry {payment}" if payment else None
+
+
+def _parse_slip_ocr(raw_text: str, doc, settings) -> dict:
+    amount_text = _first_match(
+        [
+            r"(?:จำนวนเงิน|ยอดเงิน|amount|total)\s*[:：]?\s*(?:฿|THB)?\s*([\d,]+(?:\.\d{1,2})?)",
+            r"(?:฿|THB)\s*([\d,]+(?:\.\d{1,2})?)",
+            r"([\d,]+\.\d{2})\s*(?:บาท|THB)",
+        ],
+        raw_text,
+    )
+    amount = flt(amount_text.replace(",", "")) if amount_text else 0
+    reference_no = _first_match(
+        [
+            r"(?:เลขที่รายการ|รหัสรายการ|transaction\s*(?:id|no\.?)|reference\s*(?:id|no\.?)|ref\.?)\s*[:：#]?\s*([A-Z0-9-]{6,})",
+        ],
+        raw_text,
+    )
+    transaction_at = _first_match(
+        [
+            r"(?:วันที่และเวลา|วันเวลา|date(?:/time)?|transaction\s*time)\s*[:：]?\s*([^\n]{5,50})",
+        ],
+        raw_text,
+    )
+    sender = _first_match([r"(?:จาก|ผู้โอน|sender|from)\s*[:：]?\s*([^\n]{2,100})"], raw_text)
+    recipient = _first_match([r"(?:ไปยัง|ผู้รับ|recipient|to)\s*[:：]?\s*([^\n]{2,100})"], raw_text)
+    expected_amount = flt(doc.total)
+    amount_matches = bool(amount_text) and abs(amount - expected_amount) <= 0.01
+    expected_recipient = (settings.promptpay_name or "").strip()
+    recipient_matches = not expected_recipient or expected_recipient.casefold() in raw_text.casefold()
+    duplicate_document = _duplicate_payment_reference(reference_no, doc.name)
+    duplicate = bool(duplicate_document)
+    flags = []
+    if not amount_text:
+        flags.append("amount_missing")
+    elif not amount_matches:
+        flags.append("amount_mismatch")
+    if not reference_no:
+        flags.append("reference_missing")
+    if not recipient_matches:
+        flags.append("recipient_mismatch")
+    if duplicate:
+        flags.append("duplicate_reference")
+    confidence = min(0.95, 0.35 + (0.25 if amount_text else 0) + (0.2 if reference_no else 0) + (0.15 if transaction_at else 0))
+    if confidence < flt(settings.slip_confidence_threshold or 0.95):
+        flags.append("low_confidence")
     return {
-        "verified": bool(result.get("verified") and confidence >= threshold and amount_matches),
+        "verified": False,
         "confidence": confidence,
         "amount": amount,
-        "reference_no": str(result.get("reference_no") or result.get("transaction_id") or ""),
-        "reason": result.get("reason") or (None if amount_matches else "amount_mismatch"),
+        "reference_no": reference_no,
+        "transaction_at": transaction_at,
+        "sender": sender,
+        "recipient": recipient,
+        "amount_matches": amount_matches,
+        "recipient_matches": recipient_matches,
+        "duplicate_reference": duplicate,
+        "duplicate_document": duplicate_document,
+        "flags": list(dict.fromkeys(flags)),
+        "reason": ", ".join(dict.fromkeys(flags)) or "awaiting_human_review",
+        "raw_text": raw_text[:20000],
     }
+
+
+def _verify_payment_slip(content: bytes, doc) -> dict:
+    """Extract a slip with Typhoon OCR. OCR never authorizes a payment."""
+    settings = frappe.get_single("NextGen Payment Settings")
+    token = settings.get_password("slip_verification_api_key", raise_exception=False) or ""
+    if not token:
+        return {"verified": False, "confidence": 0, "reason": "typhoon_not_configured", "flags": ["typhoon_not_configured"]}
+    from typhoon_ocr import ocr_document
+
+    suffix = ".png" if content.startswith(b"\x89PNG") else ".jpg"
+    with tempfile.NamedTemporaryFile(suffix=suffix) as image:
+        image.write(content)
+        image.flush()
+        raw_text = ocr_document(
+            image.name,
+            base_url=(settings.slip_verification_url or "https://api.opentyphoon.ai/v1").strip(),
+            api_key=token,
+            model=(settings.slip_ocr_model or "typhoon-ocr").strip(),
+        )
+    return _parse_slip_ocr(str(raw_text or ""), doc, settings)
 
 
 @frappe.whitelist()
@@ -1272,15 +1378,13 @@ def handle_line_payment_slip(
     doc.payment_verification_confidence = verification.get("confidence") or 0
     doc.payment_reference = verification.get("reference_no")
     doc.payment_verification_note = verification.get("reason")
-    doc.payment_verification_status = "Verified" if verification.get("verified") else "Needs Review"
+    doc.payment_extraction_json = json.dumps(verification, ensure_ascii=False)
+    doc.payment_duplicate_reference = int(bool(verification.get("duplicate_reference")))
+    doc.payment_verification_status = "Needs Review"
     doc.status = "Payment Review"
     _save_intake(doc)
-    if verification.get("verified"):
-        result = progress_payment(name, verification.get("reference_no") or f"LINE-{event_id or message_id}")
-        result.update({"handled": True, "verification": verification})
-    else:
-        _queue_line_notification(doc)
-        result = {"handled": True, "name": name, "status": doc.status, "verification": verification}
+    _queue_line_notification(doc)
+    result = {"handled": True, "name": name, "status": doc.status, "verification": verification}
     if event_id:
         frappe.get_doc(
             {
@@ -1300,11 +1404,37 @@ def approve_payment_slip(name: str, reference_no: str):
     doc = _lock_intake(name)
     if doc.status != "Payment Review":
         frappe.throw(_("Intake must be in Payment Review"))
+    reference_no = (reference_no or doc.payment_reference or "").strip()
+    if not reference_no:
+        frappe.throw(_("A bank reference is required"))
+    duplicate = _duplicate_payment_reference(reference_no, doc.name)
+    if duplicate:
+        frappe.throw(_("Payment reference {0} is already used by {1}").format(reference_no, duplicate))
     doc.payment_verification_status = "Verified"
     doc.payment_reference = reference_no
     doc.reviewer = frappe.session.user
+    doc.payment_reviewed_at = now_datetime()
+    doc.payment_reviewed_by = frappe.session.user
     _save_intake(doc)
     return progress_payment(name, reference_no)
+
+
+@frappe.whitelist()
+def reject_payment_slip(name: str, note: str | None = None):
+    """Reject one reviewed image without cancelling the order or recording payment."""
+    _require_operations_role()
+    doc = _lock_intake(name)
+    if doc.status != "Payment Review":
+        frappe.throw(_("Intake must be in Payment Review"))
+    doc.payment_verification_status = "Rejected"
+    doc.payment_verification_note = note or _("Slip rejected by staff; customer must send a new slip")
+    doc.payment_reviewed_at = now_datetime()
+    doc.payment_reviewed_by = frappe.session.user
+    doc.reviewer = frappe.session.user
+    doc.status = "Awaiting Payment"
+    _save_intake(doc)
+    _queue_line_notification(doc)
+    return {"name": name, "status": doc.status, "payment_verification_status": "Rejected"}
 
 
 @frappe.whitelist()
@@ -1349,7 +1479,7 @@ def get_catalog(warehouse: str | None = None, price_list: str | None = None, lim
     ) if codes and warehouse else []
     prices = frappe.get_all(
         "Item Price",
-        fields=["item_code", "price_list_rate"],
+        fields=["item_code", "price_list_rate", "valid_from", "valid_upto"],
         filters={"selling": 1, "price_list": price_list, "item_code": ["in", codes]},
         order_by="valid_from desc, modified desc",
         limit_page_length=max(len(codes) * 3, 1),
@@ -1358,8 +1488,29 @@ def get_catalog(warehouse: str | None = None, price_list: str | None = None, lim
     for row in bins:
         stock_by_item[row.item_code] = stock_by_item.get(row.item_code, 0) + flt(row.projected_qty)
     price_by_item = {}
+    today = getdate(nowdate())
     for row in prices:
+        if row.valid_from and getdate(row.valid_from) > today:
+            continue
+        if row.valid_upto and getdate(row.valid_upto) < today:
+            continue
         price_by_item.setdefault(row.item_code, flt(row.price_list_rate))
+    routes = {}
+    catalog_origin = ""
+    if codes and frappe.db.exists("DocType", "Website Item"):
+        routes = {
+            row.item_code: row.route
+            for row in frappe.get_all(
+                "Website Item",
+                filters={"item_code": ["in", codes], "published": 1},
+                fields=["item_code", "route"],
+                limit_page_length=max(len(codes), 1),
+            )
+        }
+        try:
+            catalog_origin = public_base_url()
+        except ValueError:
+            catalog_origin = ""
     data = []
     for row in items:
         aliases = _as_list(row.get("custom_nextgen_aliases"))
@@ -1377,6 +1528,11 @@ def get_catalog(warehouse: str | None = None, price_list: str | None = None, lim
                 # catalog/price questions, but must not claim a stock number.
                 "projected_qty": stock_by_item.get(row.item_code, 0) if warehouse else None,
                 "warehouse": warehouse or None,
+                "route": (
+                    f"{catalog_origin}/{routes[row.item_code].lstrip('/')}"
+                    if routes.get(row.item_code) and catalog_origin
+                    else None
+                ),
             }
         )
     return {"data": data, "has_more": len(items) == limit, "next_start": limit_start + len(items)}
@@ -1421,10 +1577,52 @@ def _invoice_token(invoice: str, line_ref: str | None, expires: int) -> str:
     return f"{encoded}.{signature}"
 
 
+def public_base_url() -> str:
+    """Return the canonical externally reachable origin for every customer link."""
+    configured = ""
+    if frappe.db.exists("DocType", "NextGen Payment Settings"):
+        configured = frappe.db.get_single_value("NextGen Payment Settings", "public_base_url") or ""
+    value = (configured or get_url() or "").strip().rstrip("/")
+    parsed = urlparse(value)
+    host = (parsed.hostname or "").casefold()
+    temporary_host = (
+        host.endswith(".ngrok-free.app")
+        or host.endswith(".ngrok-free.dev")
+        or host.endswith(".ngrok.app")
+        or host.endswith(".ngrok.io")
+    )
+    allow_temporary = str(
+        frappe.conf.get("allow_temporary_public_url") or ""
+    ).strip().casefold() in {"1", "true", "yes", "on"}
+    unsafe = (
+        parsed.scheme not in {"http", "https"}
+        or not host
+        or host in {"localhost", "127.0.0.1", "0.0.0.0"}
+        or (temporary_host and not allow_temporary)
+    )
+    production = not bool(frappe.conf.get("developer_mode"))
+    if unsafe and production:
+        raise ValueError("A stable public HTTPS base URL is required")
+    if production and parsed.scheme != "https":
+        raise ValueError("The production public base URL must use HTTPS")
+    return value
+
+
 def make_invoice_download_url(invoice: str, line_ref: str | None = None) -> str:
     days = int(frappe.db.get_single_value("NextGen Automation Settings", "invoice_link_days") or 7)
     token = _invoice_token(invoice, line_ref, int(time.time()) + days * 86400)
-    return f"{get_url()}/api/method/nextgen_erp.api.download_invoice?token={quote(token)}"
+    return f"{public_base_url()}/api/method/nextgen_erp.api.download_invoice?token={quote(token)}"
+
+
+def _safe_invoice_download_url(invoice: str, line_ref: str | None = None) -> str:
+    try:
+        return make_invoice_download_url(invoice, line_ref)
+    except ValueError:
+        frappe.log_error(
+            "Cannot create invoice URL; configure a stable HTTPS Public Base URL",
+            "NextGen public URL unavailable",
+        )
+        return ""
 
 
 def _decode_invoice_token(token: str) -> dict:
@@ -1512,7 +1710,7 @@ def make_promptpay_qr_url(invoice: str, line_ref: str | None = None) -> str | No
         return None
     days = int(frappe.db.get_single_value("NextGen Automation Settings", "invoice_link_days") or 7)
     token = _invoice_token(invoice, line_ref, int(time.time()) + days * 86400)
-    return f"{get_url()}/api/method/nextgen_erp.api.promptpay_qr?token={quote(token)}"
+    return f"{public_base_url()}/api/method/nextgen_erp.api.promptpay_qr?token={quote(token)}"
 
 
 @frappe.whitelist(allow_guest=True)
@@ -1550,7 +1748,7 @@ def _delivery_note_token(delivery_note: str, expires: int) -> str:
 
 def make_delivery_note_download_url(delivery_note: str) -> str:
     token = _delivery_note_token(delivery_note, int(time.time()) + 7 * 86400)
-    return f"{get_url()}/api/method/nextgen_erp.api.download_delivery_note?token={quote(token)}"
+    return f"{public_base_url()}/api/method/nextgen_erp.api.download_delivery_note?token={quote(token)}"
 
 
 @frappe.whitelist(allow_guest=True)

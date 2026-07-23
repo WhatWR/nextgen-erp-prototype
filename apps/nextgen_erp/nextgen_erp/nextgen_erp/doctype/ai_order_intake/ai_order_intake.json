@@ -11,6 +11,7 @@
   "merchant",
   "line_ref",
   "source_channel",
+  "checkout_idempotency_key",
   "cb1",
   "customer",
   "idempotency_key",
@@ -38,7 +39,11 @@
   "payment_verification_status",
   "payment_verification_confidence",
   "payment_reference",
-  "payment_verification_note"
+  "payment_verification_note",
+  "payment_duplicate_reference",
+  "payment_extraction_json",
+  "payment_reviewed_by",
+  "payment_reviewed_at"
  ],
  "fields": [
   {
@@ -62,7 +67,13 @@
    "fieldname": "source_channel",
    "fieldtype": "Select",
    "label": "Source Channel",
-   "options": "simulator\nline\nspreadsheet\ndesk"
+   "options": "simulator\nline\nwebshop\nspreadsheet\ndesk"
+  },
+  {
+   "fieldname": "checkout_idempotency_key",
+   "fieldtype": "Data",
+   "label": "Checkout Idempotency Key",
+   "read_only": 1
   },
   {
    "fieldname": "cb1",
@@ -231,6 +242,33 @@
    "fieldname": "payment_verification_note",
    "fieldtype": "Small Text",
    "label": "Verification Note",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "payment_duplicate_reference",
+   "fieldtype": "Check",
+   "label": "Duplicate Payment Reference",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_extraction_json",
+   "fieldtype": "Code",
+   "label": "OCR Extraction (JSON)",
+   "options": "JSON",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_reviewed_by",
+   "fieldtype": "Link",
+   "label": "Payment Reviewed By",
+   "options": "User",
+   "read_only": 1
+  },
+  {
+   "fieldname": "payment_reviewed_at",
+   "fieldtype": "Datetime",
+   "label": "Payment Reviewed At",
    "read_only": 1
   }
  ],

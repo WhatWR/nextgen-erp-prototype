@@ -7,6 +7,8 @@ x-erpnext-image: &erpnext-image
     dockerfile: docker/erpnext/Dockerfile
     args:
       ERPNEXT_VERSION: ${ERPNEXT_VERSION:-v16.20.0}
+      PAYMENTS_REF: ${PAYMENTS_REF:-cca07d9f9392e2ea0e521c5975151db9e4b6c321}
+      WEBSHOP_REF: ${WEBSHOP_REF:-3afd734a495d5869f05a4f0ae36fc76330eb7734}
   restart: unless-stopped
 
 x-backend: &backend
@@ -102,18 +104,26 @@ services:
             --db-root-username root \
             --db-root-password "$${DB_ROOT_PASSWORD}" \
             --install-app erpnext \
+            --install-app payments \
+            --install-app webshop \
             --install-app erpnext_thailand \
             --install-app nextgen_erp \
             --set-default;
         else
+          bench --site "$${SITE_NAME}" list-apps | grep -qw payments \
+            || bench --site "$${SITE_NAME}" install-app payments;
+          bench --site "$${SITE_NAME}" list-apps | grep -qw webshop \
+            || bench --site "$${SITE_NAME}" install-app webshop;
           bench --site "$${SITE_NAME}" list-apps | grep -qw erpnext_thailand \
             || bench --site "$${SITE_NAME}" install-app erpnext_thailand;
           bench --site "$${SITE_NAME}" migrate;
         fi;
-        bench --site "$${SITE_NAME}" set-config host_name "$${PUBLIC_URL}"
+        bench --site "$${SITE_NAME}" set-config host_name "$${PUBLIC_URL}";
+        bench --site "$${SITE_NAME}" set-config allow_temporary_public_url "$${ALLOW_TEMPORARY_PUBLIC_URL}"
     environment:
       SITE_NAME: ${SITE_NAME:?Set SITE_NAME in .env.server}
       PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8180}
+      ALLOW_TEMPORARY_PUBLIC_URL: ${ALLOW_TEMPORARY_PUBLIC_URL:-0}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:?Set ADMIN_PASSWORD in .env.server}
       DB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?Set DB_ROOT_PASSWORD in .env.server}
     networks: [internal]

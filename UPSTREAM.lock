@@ -29,6 +29,18 @@
       "version": "v16.20.0",
       "path": "vendor/erpnext",
       "license": "GPL-3.0"
+    },
+    "payments": {
+      "repository": "https://github.com/frappe/payments.git",
+      "commit": "cca07d9f9392e2ea0e521c5975151db9e4b6c321",
+      "branch": "version-16",
+      "license": "MIT"
+    },
+    "webshop": {
+      "repository": "https://github.com/frappe/webshop.git",
+      "commit": "3afd734a495d5869f05a4f0ae36fc76330eb7734",
+      "branch": "version-16",
+      "license": "GPL-3.0"
     }
   }
 }

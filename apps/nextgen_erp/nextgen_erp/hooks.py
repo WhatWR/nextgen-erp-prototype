@@ -5,7 +5,7 @@ app_description = "NextGen AI order intake and order-to-cash orchestration for E
 app_email = "admin@nextgen.local"
 app_license = "mit"
 
-required_apps = ["erpnext"]
+required_apps = ["erpnext", "payments", "webshop"]
 before_install = "nextgen_erp.install.before_install"
 after_install = "nextgen_erp.install.after_install"
 after_migrate = ["nextgen_erp.install.after_migrate"]
@@ -35,6 +35,7 @@ app_logo_url = "/assets/nextgen_erp/images/nextgen-erp-icon.svg"
 # include js, css files in header of desk.html
 app_include_css = "/assets/nextgen_erp/css/staff_chat.css"
 app_include_js = "/assets/nextgen_erp/js/staff_chat.js?v=20260717-1"
+web_include_js = "/assets/nextgen_erp/js/line_webshop_checkout.js?v=20260723-1"
 
 # Manual, snapshot-only forecast controls in Desk. Buying documents still go
 # through the chat preview and explicit confirmation boundary.
@@ -186,6 +187,7 @@ doctype_js = {
 scheduler_events = {
 	"daily": [
 		"nextgen_erp.staff_chat.cleanup_expired_chat_data",
+		"nextgen_erp.webshop.cleanup_expired_payment_slips",
 		# Respects enable_procurement_copilot + enable_scheduled_forecast flags.
 		"nextgen_erp.procurement.run_scheduled_forecast",
 	],
@@ -210,7 +212,8 @@ scheduler_events = {
 override_whitelisted_methods = {
 	"frappe.desk.page.setup_wizard.setup_wizard.setup_complete": (
 		"nextgen_erp.api.setup_complete_with_thailand_defaults"
-	)
+	),
+	"webshop.webshop.shopping_cart.cart.place_order": "nextgen_erp.webshop.place_order",
 }
 #
 # each overriding function accepts a `data` argument;

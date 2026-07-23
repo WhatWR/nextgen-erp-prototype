@@ -9,6 +9,7 @@ readme = "README.md"
 dynamic = ["version"]
 dependencies = [
     "qrcode[pil]>=8.0,<9.0",
+    "typhoon-ocr>=0.3.8,<0.4",
     # "frappe~=16.0.0" # Installed and managed by bench.
 ]
 

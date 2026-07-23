@@ -138,6 +138,7 @@ def build_tools(ctx: ToolContext) -> dict[str, ToolSpec]:
                     "price": row.get("price"),
                     "available_qty": row.get("projected_qty"),
                     "warehouse": row.get("warehouse") or ctx.warehouse,
+                    "route": row.get("route"),
                 }
                 for row in matches
             ],
