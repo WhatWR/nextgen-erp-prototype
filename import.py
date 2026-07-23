@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -261,16 +262,23 @@ def main() -> int:
 	parser.add_argument("--error-log")
 	args = parser.parse_args()
 
-	site = args.site or _detect_site(args.sites_path)
-	frappe.init(site=site, sites_path=args.sites_path)
+	# Frappe's file logger writes to ../logs relative to the current directory.
+	# Bench commands run from the sites directory, so mirror that behaviour when
+	# this file is launched directly with ./env/bin/python.
+	sites_path = Path(args.sites_path).expanduser().resolve()
+	csv_path = Path(args.csv_path).expanduser().resolve()
+	error_log = Path(args.error_log).expanduser().resolve() if args.error_log else None
+	site = args.site or _detect_site(str(sites_path))
+	os.chdir(sites_path)
+	frappe.init(site=site, sites_path=".")
 	frappe.connect()
 	frappe.set_user("Administrator")
 	try:
 		run(
-			csv_path=args.csv_path,
+			csv_path=str(csv_path),
 			batch_size=args.batch_size,
 			dry_run=args.dry_run,
-			error_log=args.error_log,
+			error_log=str(error_log) if error_log else None,
 		)
 		return 0
 	except KeyboardInterrupt:
