@@ -46,3 +46,11 @@ RUN ./env/bin/pip install --no-cache-dir --editable apps/nextgen_erp \
         /home/frappe/frappe-bench/assets/payments \
     && ln -sfn /home/frappe/frappe-bench/apps/webshop/webshop/public \
         /home/frappe/frappe-bench/assets/webshop
+
+# The server mounts `sites` from a persistent volume. Docker initializes a
+# volume only once, so a volume created before Webshop was added never receives
+# its bundles from later images. Keep an immutable image copy for the
+# configurator to merge into the shared volume on every deployment.
+RUN mkdir -p /home/frappe/frappe-bench/image-assets \
+    && cp -a /home/frappe/frappe-bench/sites/assets/. \
+        /home/frappe/frappe-bench/image-assets/

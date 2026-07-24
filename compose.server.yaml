@@ -68,6 +68,8 @@ services:
     entrypoint: ["bash", "-c"]
     command:
       - >-
+        mkdir -p sites/assets;
+        cp -a image-assets/. sites/assets/;
         ls -1 apps > sites/apps.txt;
         bench set-config -g db_host db;
         bench set-config -gp db_port 3306;
