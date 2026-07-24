@@ -80,9 +80,10 @@ def create_line_shop_link(
 	token = secrets.token_urlsafe(32)
 	nonce = secrets.token_hex(16)
 	expires_at = add_to_date(now_datetime(), minutes=10)
-	target = "/all-products"
+	target = "/nextgen-catalog"
 	if target_route:
 		parsed_target = urlparse(target_route)
+		target_path = ""
 		if parsed_target.scheme or parsed_target.netloc:
 			origin = urlparse(public_base_url())
 			if (
@@ -90,9 +91,17 @@ def create_line_shop_link(
 				and parsed_target.netloc == origin.netloc
 				and parsed_target.path.startswith("/")
 			):
-				target = parsed_target.path
+				target_path = parsed_target.path
 		elif target_route.startswith("/") and not target_route.startswith("//"):
-			target = target_route
+			target_path = parsed_target.path
+		if target_path and frappe.db.exists("DocType", "Website Item"):
+			item_code = frappe.db.get_value(
+				"Website Item",
+				{"route": target_path.lstrip("/"), "published": 1},
+				"item_code",
+			)
+			if item_code:
+				target = f"/nextgen-catalog?q={quote(item_code)}"
 	frappe.get_doc(
 		{
 			"doctype": "NextGen Shop Session",
@@ -142,7 +151,7 @@ def open_line_shop(token: str):
 	session.save(ignore_permissions=True)
 	frappe.local.login_manager.login_as(user)
 	frappe.local.response.type = "redirect"
-	frappe.local.response.location = session.target_route or "/all-products"
+	frappe.local.response.location = session.target_route or "/nextgen-catalog"
 	return None
 
 

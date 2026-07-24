@@ -74,6 +74,10 @@ doctype_js = {
 # Home Pages
 # ----------
 
+website_route_rules = [
+	{"from_route": "/all-products", "to_route": "nextgen-catalog"},
+]
+
 # application home page (will override Website Settings)
 # home_page = "login"
 
