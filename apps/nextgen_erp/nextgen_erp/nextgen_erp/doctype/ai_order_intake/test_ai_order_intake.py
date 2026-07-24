@@ -177,6 +177,18 @@ class IntegrationTestAIOrderIntake(IntegrationTestCase):
 				crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
 		self.assertEqual(supplied_crc, f"{crc:04X}")
 
+	def test_invoice_outstanding_is_the_customer_payment_source_of_truth(self):
+		with patch.object(
+			frappe.db,
+			"get_value",
+			return_value=frappe._dict(
+				outstanding_amount=10,
+				rounded_total=10,
+				grand_total=10.17,
+			),
+		):
+			self.assertEqual(api._invoice_payable_amount("ACC-SINV-TEST"), 10)
+
 	def test_atomic_order_to_cash_creates_submitted_erpnext_documents(self):
 		created = api.create_ai_order_intake(
 			self._payload(f"test-{frappe.generate_hash(length=10)}")
@@ -243,8 +255,13 @@ class IntegrationTestAIOrderIntake(IntegrationTestCase):
 			warehouse,
 		)
 		self.assertEqual(frappe.db.get_value("Sales Invoice", doc.sales_invoice, "docstatus"), 1)
+		self.assertEqual(
+			doc.total,
+			frappe.db.get_value("Sales Invoice", doc.sales_invoice, "outstanding_amount"),
+		)
 		message = api._line_message(doc)
 		self.assertIn(doc.sales_invoice, message)
+		self.assertIn(f"ยอด {doc.total:,.2f} บาท", message)
 		self.assertIn("/api/method/nextgen_erp.api.download_invoice", message)
 
 		with patch.object(api, "_queue_line_notification") as resend:

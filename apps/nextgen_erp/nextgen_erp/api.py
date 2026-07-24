@@ -449,6 +449,29 @@ def _row_label(row) -> str:
     return row.item_name or row.item or (row.raw_text or "").strip() or _("Unidentified item")
 
 
+def _invoice_payable_amount(invoice: str | None) -> float:
+    """Return the amount the customer must actually pay for a submitted invoice.
+
+    The invoice is the accounting source of truth after confirmation. In
+    particular, ``outstanding_amount`` reflects inclusive taxes and ERPNext's
+    configured rounded total, while an intake's item sum does not.
+    """
+    if not invoice:
+        return 0.0
+    values = frappe.db.get_value(
+        "Sales Invoice",
+        invoice,
+        ["outstanding_amount", "rounded_total", "grand_total"],
+        as_dict=True,
+    )
+    if not values:
+        return 0.0
+    outstanding = flt(values.outstanding_amount)
+    if outstanding > 0:
+        return outstanding
+    return flt(values.rounded_total or values.grand_total)
+
+
 def _line_message(doc) -> str:
     item_text = ", ".join(f"{_row_label(row)} x {row.qty:g} {row.uom or ''}".strip() for row in doc.items)
     if doc.status == "Needs Review":
@@ -475,6 +498,7 @@ def _line_message(doc) -> str:
         return f"ยืนยันออเดอร์ {doc.name} แล้ว สินค้าถูกจองและกำลังสร้างใบแจ้งหนี้ค่ะ"
     if doc.status == "Awaiting Payment":
         link = _safe_invoice_download_url(doc.sales_invoice, doc.line_ref) if doc.sales_invoice else ""
+        payable = _invoice_payable_amount(doc.sales_invoice) or flt(doc.total)
         settings = frappe.get_single("NextGen Payment Settings")
         if settings.promptpay_id:
             promptpay = f" PromptPay: {settings.promptpay_id}"
@@ -493,7 +517,7 @@ def _line_message(doc) -> str:
         invoice_line = link or "ลิงก์ใบแจ้งหนี้ยังไม่พร้อม กรุณาติดต่อเจ้าหน้าที่เพื่อขอส่งใหม่ค่ะ"
         return (
             f"ยืนยันออเดอร์ {doc.name} แล้ว ใบแจ้งหนี้ {doc.sales_invoice} "
-            f"ยอด {doc.total:,.2f} บาท{promptpay}\n{invoice_line}\n"
+            f"ยอด {payable:,.2f} บาท{promptpay}\n{invoice_line}\n"
             f"{payment_instruction}"
         ).strip()
     if doc.status == "Payment Review":
@@ -947,6 +971,10 @@ def record_customer_confirmation(name: str, confirmed: int = 1):
     if doc.sales_invoice:
         # Confirmation can be retried when the original LINE delivery failed.
         # Re-send the same signed invoice/QR without creating any new document.
+        payable = _invoice_payable_amount(doc.sales_invoice)
+        if payable and abs(flt(doc.total) - payable) > 0.001:
+            doc.total = payable
+            _save_intake(doc)
         _queue_line_notification(doc)
         return {
             "name": name,
@@ -998,6 +1026,9 @@ def record_customer_confirmation(name: str, confirmed: int = 1):
         _save_intake(doc)
     invoice = create_invoice_from_sales_order(doc.name, doc.sales_order)
     doc.sales_invoice = invoice["sales_invoice"]
+    payable = _invoice_payable_amount(doc.sales_invoice)
+    if payable:
+        doc.total = payable
     doc.status = "Awaiting Payment"
     _save_intake(doc)
     _queue_line_notification(doc)
@@ -1020,6 +1051,9 @@ def progress_delivery(name: str):
         frappe.throw(_("Intake must be Reserved before delivery"))
     result = create_invoice_from_sales_order(doc.name, doc.sales_order)
     doc.sales_invoice = result["sales_invoice"]
+    payable = _invoice_payable_amount(doc.sales_invoice)
+    if payable:
+        doc.total = payable
     doc.status = "Awaiting Payment"
     _save_intake(doc)
     _queue_line_notification(doc)
@@ -1046,12 +1080,13 @@ def progress_payment(name: str, reference_no: str | None = None):
     )
     result = {}
     if not doc.payment_entry:
+        payable = _invoice_payable_amount(doc.sales_invoice) or flt(doc.total)
         result = record_payment(
             external_reference=doc.name,
             company=company,
             customer=doc.customer,
             currency="THB",
-            amount=doc.total,
+            amount=payable,
             reference_no=reference_no,
             sales_invoice=doc.sales_invoice,
         )
@@ -1258,7 +1293,7 @@ def _parse_slip_ocr(raw_text: str, doc, settings) -> dict:
     )
     sender = _first_match([r"(?:จาก|ผู้โอน|sender|from)\s*[:：]?\s*([^\n]{2,100})"], raw_text)
     recipient = _first_match([r"(?:ไปยัง|ผู้รับ|recipient|to)\s*[:：]?\s*([^\n]{2,100})"], raw_text)
-    expected_amount = flt(doc.total)
+    expected_amount = _invoice_payable_amount(getattr(doc, "sales_invoice", None)) or flt(doc.total)
     amount_matches = bool(amount_text) and abs(amount - expected_amount) <= 0.01
     expected_recipient = (settings.promptpay_name or "").strip()
     recipient_matches = not expected_recipient or expected_recipient.casefold() in raw_text.casefold()
@@ -1719,7 +1754,9 @@ def promptpay_qr(token: str):
     try:
         payload = _decode_invoice_token(token)
         invoice = str(payload["invoice"])
-        amount = flt(frappe.db.get_value("Sales Invoice", invoice, "grand_total"))
+        amount = _invoice_payable_amount(invoice)
+        if amount <= 0:
+            frappe.throw(_("This invoice has no payable amount"))
         promptpay_id = frappe.db.get_single_value("NextGen Payment Settings", "promptpay_id") or ""
         value = _promptpay_payload(promptpay_id, amount)
     except (ValueError, TypeError, json.JSONDecodeError):
