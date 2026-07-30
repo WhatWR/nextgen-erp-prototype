@@ -35,13 +35,22 @@ intake row and run in one Frappe transaction; failed reservations roll back.
 
 ## Fresh-site setup
 
-Install the pinned Frappe and ERPNext v16.20 sources, then install this app:
+Install the pinned Frappe and ERPNext v16.20 sources, then add the companion
+apps before installing NextGen ERP:
 
 ```bash
+bench get-app --branch v1.72.0 https://github.com/frappe/crm.git
+bench get-app --branch v16.7.0 https://github.com/frappe/hrms.git
 bench get-app /absolute/path/to/apps/nextgen_erp
+bench --site your-site install-app hrms
+bench --site your-site install-app crm
 bench --site your-site install-app nextgen_erp
 bench --site your-site migrate
 ```
+
+The Docker image uses the exact commits behind those releases for
+reproducibility. Open CRM at `/crm`; assign HR and Payroll roles before exposing
+employee or salary data.
 
 The install hooks create required custom fields, the service role and the local
 service-user record. In ERPNext, open that User and generate an API key/secret.

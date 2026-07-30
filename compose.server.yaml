@@ -9,6 +9,8 @@ x-erpnext-image: &erpnext-image
       ERPNEXT_VERSION: ${ERPNEXT_VERSION:-v16.20.0}
       PAYMENTS_REF: ${PAYMENTS_REF:-cca07d9f9392e2ea0e521c5975151db9e4b6c321}
       WEBSHOP_REF: ${WEBSHOP_REF:-3afd734a495d5869f05a4f0ae36fc76330eb7734}
+      CRM_REF: ${CRM_REF:-bf1b7f07ac01b6ac435f25db7ccef6b52807720e}
+      HRMS_REF: ${HRMS_REF:-a29cc8875aab1f22707b011568f5f1f190861fc8}
   restart: unless-stopped
 
 x-backend: &backend
@@ -108,6 +110,8 @@ services:
             --install-app erpnext \
             --install-app payments \
             --install-app webshop \
+            --install-app hrms \
+            --install-app crm \
             --install-app erpnext_thailand \
             --install-app nextgen_erp \
             --set-default;
@@ -116,6 +120,10 @@ services:
             || bench --site "$${SITE_NAME}" install-app payments;
           bench --site "$${SITE_NAME}" list-apps | grep -qw webshop \
             || bench --site "$${SITE_NAME}" install-app webshop;
+          bench --site "$${SITE_NAME}" list-apps | grep -qw hrms \
+            || bench --site "$${SITE_NAME}" install-app hrms;
+          bench --site "$${SITE_NAME}" list-apps | grep -qw crm \
+            || bench --site "$${SITE_NAME}" install-app crm;
           bench --site "$${SITE_NAME}" list-apps | grep -qw erpnext_thailand \
             || bench --site "$${SITE_NAME}" install-app erpnext_thailand;
           bench --site "$${SITE_NAME}" migrate;

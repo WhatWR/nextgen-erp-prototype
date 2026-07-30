@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-13",
+  "generated_at": "2026-07-30",
   "components": {
     "erpclaw": {
       "repository": "https://github.com/avansaber/erpclaw.git",
@@ -39,6 +39,20 @@
     "webshop": {
       "repository": "https://github.com/frappe/webshop.git",
       "commit": "3afd734a495d5869f05a4f0ae36fc76330eb7734",
+      "branch": "version-16",
+      "license": "GPL-3.0"
+    },
+    "crm": {
+      "repository": "https://github.com/frappe/crm.git",
+      "commit": "bf1b7f07ac01b6ac435f25db7ccef6b52807720e",
+      "version": "v1.72.0",
+      "branch": "main",
+      "license": "AGPL-3.0"
+    },
+    "hrms": {
+      "repository": "https://github.com/frappe/hrms.git",
+      "commit": "a29cc8875aab1f22707b011568f5f1f190861fc8",
+      "version": "v16.7.0",
       "branch": "version-16",
       "license": "GPL-3.0"
     }

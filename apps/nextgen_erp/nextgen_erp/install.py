@@ -156,6 +156,12 @@ def after_install() -> None:
 	from nextgen_erp.print_formats import ensure_print_formats
 
 	ensure_print_formats()
+	from nextgen_erp.store_landing import ensure_store_landing_page
+
+	ensure_store_landing_page()
+	from nextgen_erp.website_theme import ensure_website_theme
+
+	ensure_website_theme()
 
 
 def after_migrate() -> None:
@@ -175,3 +181,9 @@ def after_migrate() -> None:
 
 	_procurement_workspace()
 	_desk_tile()
+	from nextgen_erp.store_landing import ensure_store_landing_page
+
+	ensure_store_landing_page()
+	from nextgen_erp.website_theme import ensure_website_theme
+
+	ensure_website_theme()

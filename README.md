@@ -7,6 +7,10 @@ them through a confidence-gated order-to-cash workflow.
 
 - **ERPNext v16.20** is the system of record for items, aliases, prices, stock,
   customers, Sales Orders, Pick Lists, Delivery Notes, invoices and payments.
+- **Frappe CRM v1.72** adds the dedicated `/crm` workspace for leads, deals,
+  contacts, activities and ERPNext handoff.
+- **Frappe HRMS v16.7** adds employee lifecycle, leave, attendance, expenses,
+  performance management and payroll.
 - **NextGen ERP Frappe app** owns the intake review record, automation policy,
   LINE customer mapping, durable webhook idempotency and signed invoice links.
 - **Order Intake API** verifies LINE webhooks, extracts Thai order text and writes

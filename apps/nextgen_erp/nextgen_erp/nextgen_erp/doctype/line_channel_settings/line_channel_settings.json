@@ -13,7 +13,8 @@
   "channel_id",
   "channel_secret",
   "channel_access_token",
-  "webhook_url"
+  "webhook_url",
+  "oa_add_friend_url"
  ],
  "fields": [
   {
@@ -65,13 +66,19 @@
    "fieldname": "webhook_url",
    "fieldtype": "Data",
    "label": "Webhook URL"
+  },
+  {
+   "description": "Public LINE Official Account add-friend URL (e.g. https://lin.ee/xxxx or https://line.me/R/ti/p/@basicid). Used as the primary call-to-action on the /store landing page.",
+   "fieldname": "oa_add_friend_url",
+   "fieldtype": "Data",
+   "label": "LINE OA Add-Friend URL"
   }
  ],
  "grid_page_length": 50,
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2026-07-12 23:00:38.039237",
+ "modified": "2026-07-27 00:00:00.000000",
  "modified_by": "Administrator",
  "module": "NextGen ERP",
  "name": "LINE Channel Settings",

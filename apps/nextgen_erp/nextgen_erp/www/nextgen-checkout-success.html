@@ -1,32 +1,31 @@
 {% extends "templates/web.html" %}
 
 {% block page_content %}
-<div class="container py-5" style="max-width: 720px">
-	<div class="card">
-		<div class="card-body p-4">
-			<h2>ยืนยันออเดอร์แล้ว</h2>
-			<p class="text-muted">ระบบส่งรายละเอียดชุดเดียวกันไปยัง LINE ของคุณแล้ว</p>
-			<dl class="row">
-				<dt class="col-sm-4">ออเดอร์</dt><dd class="col-sm-8">{{ order.name }}</dd>
-				<dt class="col-sm-4">Sales Order</dt><dd class="col-sm-8">{{ order.sales_order }}</dd>
-				<dt class="col-sm-4">ใบแจ้งหนี้</dt><dd class="col-sm-8">{{ order.sales_invoice }}</dd>
-				<dt class="col-sm-4">ยอดชำระ</dt><dd class="col-sm-8">{{ "{:,.2f}".format(order.total) }} บาท</dd>
-			</dl>
-			{% if invoice_url %}
-			<a class="btn btn-secondary mr-2" href="{{ invoice_url }}">ดาวน์โหลดใบแจ้งหนี้</a>
-			{% endif %}
-			{% if qr_url %}
-			<div class="mt-4">
-				<h5>สแกน PromptPay QR</h5>
-				<img src="{{ qr_url }}" alt="PromptPay QR" style="max-width: 320px; width: 100%">
-				<p class="mt-2">หลังชำระแล้ว กรุณาแนบรูปสลิปในแชต LINE เพื่อให้เจ้าหน้าที่ตรวจสอบ</p>
-			</div>
-			{% else %}
-			<div class="alert alert-warning mt-4">
-				ร้านค้ายังไม่ได้ตั้งค่า PromptPay กรุณารอเจ้าหน้าที่แจ้งช่องทางชำระเงินทาง LINE
-			</div>
-			{% endif %}
+<div class="ng-page ng-page--medium container">
+	<div class="ng-status-card">
+		<div class="ng-eyebrow">NextGen ERP · Order confirmed</div>
+		<h2>ยืนยันออเดอร์แล้ว</h2>
+		<p class="text-muted">ระบบส่งรายละเอียดชุดเดียวกันไปยัง LINE ของคุณแล้ว</p>
+		<dl class="row ng-detail-list">
+			<dt class="col-sm-4">ออเดอร์</dt><dd class="col-sm-8">{{ order.name }}</dd>
+			<dt class="col-sm-4">Sales Order</dt><dd class="col-sm-8">{{ order.sales_order }}</dd>
+			<dt class="col-sm-4">ใบแจ้งหนี้</dt><dd class="col-sm-8">{{ order.sales_invoice }}</dd>
+			<dt class="col-sm-4">ยอดชำระ</dt><dd class="col-sm-8">{{ "{:,.2f}".format(order.total) }} บาท</dd>
+		</dl>
+		{% if invoice_url %}
+		<a class="btn btn-secondary mr-2" href="{{ invoice_url }}">ดาวน์โหลดใบแจ้งหนี้</a>
+		{% endif %}
+		{% if qr_url %}
+		<div class="ng-qr-panel">
+			<h5>สแกน PromptPay QR</h5>
+			<img class="ng-qr" src="{{ qr_url }}" alt="PromptPay QR">
+			<p class="mt-2">หลังชำระแล้ว กรุณาแนบรูปสลิปในแชต LINE เพื่อให้เจ้าหน้าที่ตรวจสอบ</p>
 		</div>
+		{% else %}
+		<div class="alert alert-warning mt-4">
+			ร้านค้ายังไม่ได้ตั้งค่า PromptPay กรุณารอเจ้าหน้าที่แจ้งช่องทางชำระเงินทาง LINE
+		</div>
+		{% endif %}
 	</div>
 </div>
 {% endblock %}

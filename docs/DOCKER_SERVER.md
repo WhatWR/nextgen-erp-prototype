@@ -1,8 +1,9 @@
 # Deploy NextGen ERP with Docker Compose
 
-This stack is intended for a single Linux server. It runs ERPNext, the NextGen
-Frappe app, MariaDB, Redis, workers, scheduler, websocket, LINE order intake and
-Caddy HTTPS. Only ports 80 and 443 are public.
+This stack is intended for a single Linux server. It runs ERPNext, Frappe CRM,
+Frappe HRMS (HR and Payroll), the NextGen Frappe app, MariaDB, Redis, workers,
+scheduler, websocket, LINE order intake and Caddy HTTPS. Only ports 80 and 443
+are public.
 
 For local development where ERPNext runs from the Bench source tree but MariaDB
 and Redis run in Docker, use `./scripts/start-local.sh` instead.
@@ -41,7 +42,8 @@ example `SERVER_ENV_FILE=.env.staging docker compose up -d`.
 
 `create-site` exits successfully after it creates or migrates the ERPNext site.
 Open `http://127.0.0.1:8180` and sign in as `Administrator` using the password
-from `.env.server`.
+from `.env.server`. CRM is available at `/crm`; HR and Payroll appear in Desk
+after the relevant roles are assigned.
 
 ## Temporary public URL with ngrok (development only)
 
@@ -122,7 +124,7 @@ docker compose exec backend bench --site "$SITE_NAME" execute \
 
 ## Publish the product catalog
 
-The image includes the pinned Payments and Webshop v16 apps. After migration,
+The image includes pinned CRM, HRMS, Payments and Webshop apps. After migration,
 preview eligible priced sales items:
 
 ```bash

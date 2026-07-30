@@ -13,3 +13,6 @@ No commercial or trademark licence from AvanSaber is implied by this prototype.
 `vendor/frappe` is Frappe Framework v16.20.0 under the MIT License.
 `vendor/erpnext` is ERPNext v16.20.0 under GNU GPL v3. Original notices remain
 inside each pinned submodule.
+
+The server image also includes Frappe CRM v1.72.0 under GNU AGPL v3 and Frappe
+HRMS v16.7.0 under GNU GPL v3. Their original notices are retained in the image.

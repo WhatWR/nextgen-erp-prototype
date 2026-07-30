@@ -3,35 +3,9 @@
 {% block title %}แคตตาล็อกสินค้า{% endblock %}
 
 {% block page_content %}
-<style>
-	.ng-catalog { --ng-green: #168453; --ng-ink: #17211b; color: var(--ng-ink); }
-	.ng-hero { background: linear-gradient(135deg, #effaf4, #f8fbf9); border: 1px solid #dceee4; border-radius: 20px; padding: 28px; }
-	.ng-toolbar { display: grid; grid-template-columns: minmax(220px, 1fr) auto; gap: 12px; margin: 24px 0; }
-	.ng-search { border: 1px solid #d8dfdb; border-radius: 12px; padding: 12px 14px; width: 100%; }
-	.ng-groups { display: flex; flex-wrap: wrap; gap: 8px; }
-	.ng-chip { border: 1px solid #d8dfdb; background: white; border-radius: 999px; padding: 8px 13px; cursor: pointer; }
-	.ng-chip.active { background: var(--ng-green); border-color: var(--ng-green); color: white; }
-	.ng-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(245px, 1fr)); gap: 18px; }
-	.ng-card { border: 1px solid #e2e7e4; border-radius: 16px; background: white; overflow: hidden; box-shadow: 0 5px 18px rgba(23, 33, 27, .05); }
-	.ng-image { aspect-ratio: 4 / 3; background: #f3f6f4; display: grid; place-items: center; overflow: hidden; color: #809087; font-size: 42px; font-weight: 700; }
-	.ng-image img { width: 100%; height: 100%; object-fit: cover; }
-	.ng-body { padding: 17px; }
-	.ng-code { color: #68756d; font-size: 12px; }
-	.ng-title { font-size: 18px; margin: 4px 0 8px; }
-	.ng-description { color: #68756d; min-height: 42px; font-size: 14px; }
-	.ng-price { font-size: 20px; font-weight: 700; margin-top: 14px; }
-	.ng-stock { font-size: 13px; margin: 5px 0 14px; color: var(--ng-green); }
-	.ng-stock.out { color: #b42318; }
-	.ng-order { width: 100%; border: 0; border-radius: 10px; padding: 10px 12px; background: var(--ng-green); color: white; font-weight: 600; }
-	.ng-order:disabled { background: #b9c2bd; }
-	.ng-empty { text-align: center; padding: 50px 20px; border: 1px dashed #d8dfdb; border-radius: 16px; color: #68756d; }
-	.ng-toast { position: fixed; right: 18px; bottom: 18px; background: #17211b; color: white; border-radius: 10px; padding: 12px 16px; display: none; z-index: 999; }
-	@media (max-width: 720px) { .ng-toolbar { grid-template-columns: 1fr; } .ng-hero { padding: 20px; } }
-</style>
-
-<div class="ng-catalog container py-5">
+<div class="ng-page ng-catalog container">
 	<section class="ng-hero">
-		<div class="text-uppercase small text-muted mb-2">NextGen ERP · Live catalog</div>
+		<div class="ng-eyebrow">NextGen ERP · Live catalog</div>
 		<h1 class="mb-2">สินค้าพร้อมขาย</h1>
 		<p class="mb-0 text-muted">ราคาและสต็อกอ่านจาก ERPNext โดยตรง เลือกสินค้าแล้วคัดลอกข้อความเพื่อสั่งซื้อใน LINE ได้ทันที</p>
 	</section>
