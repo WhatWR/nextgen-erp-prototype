@@ -47,6 +47,7 @@
       "commit": "bf1b7f07ac01b6ac435f25db7ccef6b52807720e",
       "version": "v1.72.0",
       "branch": "main",
+      "frappe_ui_commit": "61d6228d38e0a74dc2c207ede6a04dcea4c408be",
       "license": "AGPL-3.0"
     },
     "hrms": {
@@ -54,6 +55,7 @@
       "commit": "a29cc8875aab1f22707b011568f5f1f190861fc8",
       "version": "v16.7.0",
       "branch": "version-16",
+      "frappe_ui_commit": "863eaae9ada2edb287fc09fb21d05212bb5eebe9",
       "license": "GPL-3.0"
     }
   }

@@ -27,11 +27,21 @@ RUN mkdir -p apps/webshop \
     && git -C apps/webshop remote add origin https://github.com/frappe/webshop.git \
     && git -C apps/webshop fetch --depth=1 origin "${WEBSHOP_REF}" \
     && git -C apps/webshop checkout --detach FETCH_HEAD
-RUN git clone --filter=blob:none --branch main https://github.com/frappe/crm.git apps/crm \
-    && git -C apps/crm checkout "${CRM_REF}" \
+RUN mkdir -p apps/crm \
+    && git -C apps/crm init \
+    && git -C apps/crm remote add origin https://github.com/frappe/crm.git \
+    && git -C apps/crm sparse-checkout init --no-cone \
+    && git -C apps/crm sparse-checkout set --no-cone '/*' '!/*/' '/crm/' '!/crm/public/videos/' '!/crm/public/images/demo/' '/frontend/' '!/frontend/tests/' '/frappe-ui/' \
+    && git -C apps/crm fetch --depth=1 --filter=blob:limit=256k origin "${CRM_REF}" \
+    && git -C apps/crm checkout --detach FETCH_HEAD \
     && git -C apps/crm submodule update --init --recursive --depth=1
-RUN git clone --filter=blob:none --branch version-16 https://github.com/frappe/hrms.git apps/hrms \
-    && git -C apps/hrms checkout "${HRMS_REF}" \
+RUN mkdir -p apps/hrms \
+    && git -C apps/hrms init \
+    && git -C apps/hrms remote add origin https://github.com/frappe/hrms.git \
+    && git -C apps/hrms sparse-checkout init --no-cone \
+    && git -C apps/hrms sparse-checkout set --no-cone '/*' '!/*/' '/hrms/' '/frontend/' '!/frontend/tests/' '/roster/' '!/roster/tests/' '/frappe-ui/' \
+    && git -C apps/hrms fetch --depth=1 --filter=blob:limit=256k origin "${HRMS_REF}" \
+    && git -C apps/hrms checkout --detach FETCH_HEAD \
     && git -C apps/hrms submodule update --init --recursive --depth=1
 RUN ./env/bin/pip install --no-cache-dir --editable apps/erpnext_thailand \
     && ./env/bin/pip install --no-cache-dir --editable apps/payments \
@@ -39,14 +49,21 @@ RUN ./env/bin/pip install --no-cache-dir --editable apps/erpnext_thailand \
     && ./env/bin/pip install --no-cache-dir --editable apps/crm \
     && ./env/bin/pip install --no-cache-dir --editable apps/hrms
 
-RUN yarn --cwd apps/crm install --frozen-lockfile \
-    && yarn --cwd apps/hrms install --frozen-lockfile
+RUN --mount=type=cache,target=/home/frappe/.cache/yarn,uid=1000,gid=1000 \
+    find apps/crm apps/hrms -name yarn.lock -exec \
+        sed -i 's#https://registry.yarnpkg.com#https://registry.npmjs.org#g' {} + \
+    && yarn config set registry https://registry.npmjs.org \
+    && YARN_NETWORK_TIMEOUT=600000 YARN_NETWORK_CONCURRENCY=4 \
+        yarn --cwd apps/crm install --frozen-lockfile \
+    && YARN_NETWORK_TIMEOUT=600000 YARN_NETWORK_CONCURRENCY=4 \
+        yarn --cwd apps/hrms install --frozen-lockfile
 
 COPY --chown=frappe:frappe apps/nextgen_erp /home/frappe/frappe-bench/apps/nextgen_erp
 COPY --chown=frappe:frappe import.py /home/frappe/frappe-bench/import.py
 COPY --chown=frappe:frappe data/imports /home/frappe/frappe-bench/imports
 
-RUN ./env/bin/pip install --no-cache-dir --editable apps/nextgen_erp \
+RUN bench set-config -gp socketio_port 9000 \
+    && ./env/bin/pip install --no-cache-dir --editable apps/nextgen_erp \
     && bench build --app nextgen_erp \
     && bench build --app erpnext_thailand \
     && bench build --app payments \
