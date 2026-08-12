@@ -39,7 +39,7 @@ class IntegrationTestAgentRouting(IntegrationTestCase):
 		frappe.set_user("Administrator")
 
 	def test_registry_is_complete(self):
-		self.assertEqual(set(agents.AGENTS), {"sales", "procurement"})
+		self.assertEqual(set(agents.AGENTS), {"sales", "procurement", "assistant"})
 		for agent in agents.AGENTS.values():
 			self.assertTrue(agent.title and agent.icon and agent.color)
 			self.assertTrue(agent.required_roles)

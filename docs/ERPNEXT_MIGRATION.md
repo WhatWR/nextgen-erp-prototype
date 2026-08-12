@@ -1,5 +1,7 @@
 # ERPNext integration and operations
 
+> **Document status:** Current ERPNext integration and migration guide. Target runtime migration is defined in [Phase 1](AI_HANDOFF/PHASE_1_AGENT_PLATFORM.md).
+
 ## Runtime flow
 
 ```text

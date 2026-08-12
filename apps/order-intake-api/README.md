@@ -1,5 +1,7 @@
 # Order Intake API
 
+> **Document status:** Current LINE intake capability and local operation notes. See the [canonical AI handoff](../../docs/AI_HANDOFF/README.md) for target architecture and implementation phases.
+
 This is the Thailand-first product layer. It accepts LINE-like Thai order text,
 matches it to a merchant catalog, and routes it through a confidence-gated
 order-to-cash workflow. ERPClaw live execution is opt-in and dry-run by default.

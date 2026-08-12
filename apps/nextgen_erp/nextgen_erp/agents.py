@@ -17,7 +17,7 @@ import frappe
 from frappe import _
 
 DEFAULT_AGENT = "sales"
-VALID_AGENT_TYPES = ("sales", "procurement")
+VALID_AGENT_TYPES = ("sales", "procurement", "assistant")
 
 
 @dataclass(frozen=True)
@@ -51,11 +51,17 @@ class Agent:
 	def system_prompt(self) -> str:
 		return self._module().SYSTEM_PROMPT
 
-	def dispatch(self, name: str, arguments: dict, *, user: str, session_id: str) -> dict:
-		"""Run one tool strictly inside this agent's allowlist."""
+	def dispatch(self, name: str, arguments: dict, *, user: str, session_id: str, run=None) -> dict:
+		"""Run one tool strictly inside this agent's allowlist.
+
+		``run`` is the persisted NextGen Agent Run when the call came through
+		the agent gateway. Tools that need the run's company or requester read
+		it from there and never from their own arguments. The legacy in-process
+		chat path passes None.
+		"""
 		if name not in self.tool_names:
 			return {"error": f"Tool not allowed for agent {self.key}: {name}"}
-		return self._module().dispatch_tool(name, arguments, user=user, session_id=session_id)
+		return self._module().dispatch_tool(name, arguments, user=user, session_id=session_id, run=run)
 
 	def has_access(self, user: str) -> bool:
 		if user == "Administrator":
@@ -184,6 +190,33 @@ AGENTS: dict[str, Agent] = {
 		action_preview_text=(
 			"สร้าง Action Preview ฝั่งจัดซื้อแล้วค่ะ กรุณาตรวจสอบข้อมูลด้านล่าง "
 			"ขณะนี้ยังไม่ได้สร้างเอกสารจัดซื้อใดๆ และจะดำเนินการต่อเมื่อคุณกดยืนยันเท่านั้น"
+		),
+	),
+	"assistant": Agent(
+		key="assistant",
+		title="AI Assistant",
+		subtitle="ผู้ช่วยงาน ERP ทั่วไป",
+		icon="/assets/nextgen_erp/images/nextgen-erp-icon.svg",
+		color="#8b5cf6",
+		required_roles=frozenset(
+			{"System Manager", "Sales Manager", "Sales User", "Purchase Manager", "Purchase User", "Stock Manager"}
+		),
+		tools_path="nextgen_erp.domain_tools.documents",
+		action_types=frozenset({"prepare_document"}),
+		route_keywords=("ai-assistant", "nextgen-assistant"),
+		welcome_message=(
+			"สวัสดีค่ะ ฉันช่วยค้นหาและเตรียมสร้างเอกสารใน ERP ให้ได้ "
+			"ทุกอย่างจะสร้างเป็นข้อเสนอให้คุณตรวจและกดอนุมัติก่อนเสมอ"
+		),
+		suggested_questions=(
+			"สร้าง Item ใหม่ชื่อ food",
+			"เพิ่มลูกค้าใหม่",
+			"ฉันสร้างเอกสารอะไรได้บ้าง",
+		),
+		model_fields=("staff_chat_model", "chat_model"),
+		action_preview_text=(
+			"เตรียมข้อเสนอสร้างเอกสารแล้วค่ะ กรุณาตรวจสอบด้านล่าง "
+			"ขณะนี้ยังไม่ได้บันทึกลง ERP และจะดำเนินการต่อเมื่อคุณกดอนุมัติเท่านั้น"
 		),
 	),
 }

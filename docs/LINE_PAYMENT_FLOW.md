@@ -1,5 +1,7 @@
 # LINE payment-first order flow
 
+> **Document status:** Current LINE payment and order-flow capability. This behavior is a required regression contract in the [canonical acceptance tests](AI_HANDOFF/ACCEPTANCE_TESTS.md).
+
 ## Lifecycle
 
 1. A customer sends Thai order text to the LINE Official Account.

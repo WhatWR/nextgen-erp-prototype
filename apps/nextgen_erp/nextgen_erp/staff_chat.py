@@ -522,15 +522,42 @@ def delete_session(session_id: str):
 	return {"deleted": True, "session_id": session_id}
 
 
+def _resolve_action_id(action_id: str) -> str:
+	"""Accept either a legacy Chat Action ID or a generic Action Proposal ID.
+
+	Compatibility wrapper for one transition release: links, clients and jobs
+	created before the agent gateway keep working while new traffic uses the
+	generic proposal record.
+	"""
+	action_id = str(action_id or "").strip()
+	if not action_id or frappe.db.exists("NextGen Chat Action", action_id):
+		return action_id
+	if frappe.db.table_exists("NextGen Action Proposal"):
+		legacy = frappe.db.get_value("NextGen Action Proposal", action_id, "legacy_chat_action")
+		if legacy:
+			return legacy
+	return action_id
+
+
+def _sync_proposal(action) -> None:
+	"""Keep a dual-written Action Proposal reconciled with its chat action."""
+	if not frappe.db.table_exists("NextGen Action Proposal"):
+		return
+	from nextgen_erp.action_proposals import service as proposals
+
+	proposals.sync_from_chat_action(action)
+
+
 @frappe.whitelist()
 def cancel_action(action_id: str):
 	user = _require_staff()
-	action = frappe.get_doc("NextGen Chat Action", action_id)
+	action = frappe.get_doc("NextGen Chat Action", _resolve_action_id(action_id))
 	if action.user != user:
 		frappe.throw(_("Chat action not found"), frappe.DoesNotExistError)
 	if action.status == "Pending":
 		action.status = "Cancelled"
 		action.save(ignore_permissions=True)
+		_sync_proposal(action)
 	return {"action_id": action.name, "status": action.status}
 
 
@@ -712,6 +739,7 @@ def revise_action(action_id: str, changes=None):
 		ensure_ascii=False,
 	)
 	action.save(ignore_permissions=True)
+	_sync_proposal(action)
 	message = frappe.db.get_value(
 		"NextGen Chat Message", {"action": action.name}, "name", order_by="creation desc"
 	)
@@ -722,6 +750,44 @@ def revise_action(action_id: str, changes=None):
 	frappe.db.commit()
 	replacement["supersedes"] = action.name
 	return replacement
+
+
+def _record_preview_proposal(agent, user: str, session_id: str, tool_name: str, arguments: dict, result: dict):
+	"""Turn a preview-only tool result into an Agent Run plus Action Proposal.
+
+	The copilots write their own NextGen Chat Action, so they never reach here.
+	The assistant's generic document tool deliberately does not, because the
+	Action Proposal is its only record — and it must exist before a human can
+	approve anything.
+	"""
+	from nextgen_erp.action_proposals import service as proposals
+	from nextgen_erp.agent_gateway import policy
+	from nextgen_erp.agent_records import runs
+
+	company = policy.default_company(user)
+	if not company:
+		frappe.log_error(
+			title="NextGen assistant proposal",
+			message="no default company; cannot scope an agent run",
+		)
+		return None
+	try:
+		run = runs.create_run(
+			agent_type=agent.key,
+			company=company,
+			requested_by=user,
+			trigger_type="chat",
+			chat_session=session_id,
+			input_payload={"messages": [], "context": {"embedded": True}},
+		)
+		payload = proposals.from_tool_result(run, tool_name, arguments, result)
+		runs.complete(run.name, "Waiting Approval")
+	except Exception:
+		frappe.log_error(title="NextGen assistant proposal", message=frappe.get_traceback())
+		return None
+	# The card renderer keys off the action type.
+	payload["action_type"] = tool_name
+	return payload
 
 
 def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
@@ -783,6 +849,7 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 		agent_tools = agent.tools
 		agent_tool_names = agent.tool_names
 		action_ids: list[str] = []
+		proposal_ids: list[str] = []
 		tool_log: list[str] = []
 		forecasts: list[dict] = []
 		comparisons: list[dict] = []
@@ -826,6 +893,19 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 						"action",
 						action=result,
 					)
+				elif result.get("proposal_payload") is not None:
+					# A preview-only tool (the assistant's generic document
+					# tool) has no legacy Chat Action, so its Action Proposal is
+					# the only record. Create it here with its own Agent Run so
+					# the embedded path produces the same audit trail as the
+					# gateway path.
+					proposal = _record_preview_proposal(
+						agent, user, session_id, name, arguments, result
+					)
+					if proposal:
+						proposal_ids.append(proposal["proposal_id"])
+						result = proposal
+						_publish(user, turn_id, "action", action=proposal)
 				if result.get("forecast_card"):
 					card = {key: value for key, value in result.items() if key != "forecast_card"}
 					forecasts.append(card)
@@ -851,7 +931,7 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 						],
 					}
 				)
-		if action_ids:
+		if action_ids or proposal_ids:
 			# Never let the model claim that a preview is an executed document or
 			# invent a document number. The action card is the authoritative summary.
 			final_text = agent.action_preview_text or ACTION_PREVIEW_TEXT
@@ -874,7 +954,7 @@ def run_turn(user: str, session_id: str, turn_id: str, page_context=None):
 			final_text,
 			turn_id=turn_id,
 			action=action_ids[-1] if action_ids else None,
-			message_type="action" if action_ids else "text",
+			message_type="action" if (action_ids or proposal_ids) else "text",
 			agent_type=agent.key,
 			tool_summary={
 				"tools": tool_log,
@@ -1066,7 +1146,7 @@ def _direct_sales_catalog_answer(text: str) -> str | None:
 	return header + "ค่ะ\n" + "\n".join(lines)
 
 
-def _dispatch_tool(name: str, arguments: dict, *, user: str, session_id: str):
+def _dispatch_tool(name: str, arguments: dict, *, user: str, session_id: str, run=None):
 	if name == "search_customers":
 		return {"customers": _search_customers(str(arguments.get("query") or ""), arguments.get("limit") or 5)}
 	if name == "search_items":
@@ -1231,6 +1311,19 @@ def _prepare_sales_order(arguments: dict, *, user: str, session_id: str):
 		"confidence": confidence,
 		"warnings": warnings,
 	}
+	if not session_id:
+		# Gateway-driven runs (schedule, webhook, document event) have no chat
+		# session. The generic NextGen Action Proposal is the durable record
+		# instead; the caller builds it from this preview-only result.
+		return {
+			"action_id": None,
+			"status": "Preview",
+			"expires_at": None,
+			"preview": preview,
+			"proposal_payload": arguments,
+			"warnings": warnings,
+			"confidence": confidence,
+		}
 	action = frappe.get_doc(
 		{
 			"doctype": "NextGen Chat Action",
@@ -1362,6 +1455,7 @@ def _execute_sales_action(action) -> tuple[str, str, dict, bool]:
 @frappe.whitelist()
 def confirm_action(action_id: str):
 	user = _require_staff()
+	action_id = _resolve_action_id(action_id)
 	frappe.db.sql("select name from `tabNextGen Chat Action` where name=%s for update", action_id)
 	action = frappe.get_doc("NextGen Chat Action", action_id)
 	if action.user != user:
@@ -1402,6 +1496,7 @@ def confirm_action(action_id: str):
 		action.result_name = name
 		action.result_json = json.dumps(result, ensure_ascii=False, default=str)
 		action.save(ignore_permissions=True)
+		_sync_proposal(action)
 		frappe.db.commit()
 		_publish(
 			user,
@@ -1426,6 +1521,7 @@ def confirm_action(action_id: str):
 		failed.status = "Failed"
 		failed.result_json = json.dumps({"error": traceback}, ensure_ascii=False)
 		failed.save(ignore_permissions=True)
+		_sync_proposal(failed)
 		frappe.db.commit()
 		raise
 
@@ -1437,6 +1533,11 @@ def cleanup_expired_chat_data():
 		"NextGen Chat Action", filters={"status": "Pending", "expires_at": ["<", now]}, pluck="name"
 	):
 		frappe.db.set_value("NextGen Chat Action", action, "status", "Expired", update_modified=False)
+	if frappe.db.table_exists("NextGen Action Proposal"):
+		# Expiry blocks execution on both records; it is never silently extended.
+		from nextgen_erp.action_proposals import service as proposals
+
+		proposals.expire_due()
 	days = settings["retention_days"]
 	if not days:
 		return

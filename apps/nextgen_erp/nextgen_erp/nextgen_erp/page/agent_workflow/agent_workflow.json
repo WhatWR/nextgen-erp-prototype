@@ -1,0 +1,18 @@
+{
+ "content": null,
+ "doctype": "Page",
+ "idx": 0,
+ "module": "NextGen ERP",
+ "name": "agent-workflow",
+ "page_name": "agent-workflow",
+ "roles": [
+  {"role": "System Manager"},
+  {"role": "Sales Manager"},
+  {"role": "Purchase Manager"}
+ ],
+ "script": null,
+ "standard": "Yes",
+ "style": null,
+ "system_page": 0,
+ "title": "Agent Workflows"
+}

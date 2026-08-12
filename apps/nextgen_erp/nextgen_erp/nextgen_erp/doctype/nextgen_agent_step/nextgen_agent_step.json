@@ -1,0 +1,39 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["run", "sequence", "step_type", "operation", "status", "column_break_identity", "idempotency_key", "correlation_id", "started_at", "ended_at", "latency_ms", "section_payload", "sanitized_input", "sanitized_output", "input_hash", "output_hash", "section_result", "result_doctype", "result_name", "error"],
+ "fields": [
+  {"fieldname": "run", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "Run", "options": "NextGen Agent Run", "reqd": 1},
+  {"description": "Monotonically increasing within the run. Ordering is stable across restarts.", "fieldname": "sequence", "fieldtype": "Int", "in_list_view": 1, "label": "Sequence", "reqd": 1},
+  {"fieldname": "step_type", "fieldtype": "Select", "in_list_view": 1, "in_standard_filter": 1, "label": "Step Type", "options": "Model\nTool\nPolicy\nProposal\nSystem", "reqd": 1},
+  {"fieldname": "operation", "fieldtype": "Data", "in_list_view": 1, "label": "Operation", "reqd": 1},
+  {"fieldname": "status", "fieldtype": "Select", "in_list_view": 1, "label": "Status", "options": "Started\nSuccess\nError\nRejected", "reqd": 1},
+  {"fieldname": "column_break_identity", "fieldtype": "Column Break"},
+  {"description": "Globally unique. Replaying a step reuses its key instead of appending a duplicate.", "fieldname": "idempotency_key", "fieldtype": "Data", "label": "Idempotency Key", "reqd": 1, "unique": 1},
+  {"fieldname": "correlation_id", "fieldtype": "Data", "in_standard_filter": 1, "label": "Correlation ID"},
+  {"fieldname": "started_at", "fieldtype": "Datetime", "label": "Started At"},
+  {"fieldname": "ended_at", "fieldtype": "Datetime", "label": "Ended At"},
+  {"fieldname": "latency_ms", "fieldtype": "Int", "label": "Latency (ms)"},
+  {"fieldname": "section_payload", "fieldtype": "Section Break", "label": "Sanitized Payload"},
+  {"description": "Redacted. Credentials, tokens, payment secrets, hidden model reasoning and unnecessary personal data are never stored here.", "fieldname": "sanitized_input", "fieldtype": "JSON", "label": "Sanitized Input"},
+  {"fieldname": "sanitized_output", "fieldtype": "JSON", "label": "Sanitized Output"},
+  {"description": "Hash of the complete pre-redaction payload, so truncation and redaction remain verifiable.", "fieldname": "input_hash", "fieldtype": "Data", "label": "Input Hash", "read_only": 1},
+  {"fieldname": "output_hash", "fieldtype": "Data", "label": "Output Hash", "read_only": 1},
+  {"fieldname": "section_result", "fieldtype": "Section Break", "label": "Result"},
+  {"fieldname": "result_doctype", "fieldtype": "Data", "label": "Result DocType"},
+  {"fieldname": "result_name", "fieldtype": "Dynamic Link", "label": "Result Name", "options": "result_doctype"},
+  {"fieldname": "error", "fieldtype": "Small Text", "label": "Error"}
+ ],
+ "links": [],
+ "module": "NextGen ERP",
+ "name": "NextGen Agent Step",
+ "permissions": [
+  {"create": 1, "delete": 1, "read": 1, "report": 1, "role": "System Manager"},
+  {"create": 1, "read": 1, "role": "NextGen Agent Runtime"}
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

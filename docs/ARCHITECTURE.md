@@ -1,51 +1,52 @@
-# Prototype architecture
+# Architecture overview
 
-## Product boundary
+**Document status:** Current capability summary with target-architecture link
+**Canonical target contract:** [AI/SCM target architecture](AI_HANDOFF/TARGET_ARCHITECTURE.md)
 
-```text
-LINE / simulator / spreadsheet
-              |
-              v
-   verified channel intake
-              |
-              v
- Thai normalization + catalog matching
-              |
-              v
- confidence, stock and policy checks
-              |
-              v
-       human review queue
-              |
-              v
- controlled adapter contract
-        /             \
- CSV/Excel          ERPClaw action API
- customer system    (dry-run in prototype)
-```
+## Current system
 
-The AI/order-intake layer is the product. ERPClaw is one replaceable operating
-substrate. Connectors do not write directly to ERPClaw tables.
+    LINE OA / Desk / scheduler
+            |
+            v
+    verified or authenticated request
+            |
+            v
+    bounded AI routing and deterministic domain logic
+            |
+            v
+    whitelisted nextgen_erp methods
+            |
+            v
+    ERPNext documents, stock ledger, and general ledger
 
-## Decisions
+ERPNext is the source of truth. The NextGen Frappe app owns intake review,
+copilot tools, automation policy, previews, revalidation, channel mappings, and
+signed links. The external order-intake service verifies LINE webhooks and
+extracts Thai order text. ERPClaw is paused and replaceable.
 
-1. **Human approval is mandatory.** Every inbound message creates a draft.
-2. **Inbound text is untrusted data.** A customer message never receives general
-   OpenClaw or ERP credentials.
-3. **ERPClaw is pinned upstream.** Core remains an unmodified submodule. The web
-   interface carries a small local branch.
-4. **One customer instance first.** The prototype uses a merchant-scoped schema,
-   but the production pilot should isolate each customer database and deployment.
-5. **The legal ledger stays outside the prototype.** Approval creates CSV and a
-   non-executed ERPClaw request artifact. Thai accounting posting follows only
-   after CPA/tax validation.
-6. **No autonomous module generation.** ERPClaw OS generation/deployment paths
-   are not used.
+See [Current state](AI_HANDOFF/CURRENT_STATE.md) for the implemented component
+inventory and known debt.
 
-## Production path
+## Invariants
 
-Replace the prototype SQLite database with PostgreSQL, introduce authenticated
-staff roles, move write-back into a queued connector service, add signed LINE
-webhooks and retries, then implement an ERPClaw action adapter using a narrowly
-scoped service account. A separate `erpclaw-thailand` module should hold Thai
-localization rather than patching upstream core.
+1. Inbound text and model output are untrusted.
+2. AI never writes ERP tables or constructs ledger rows directly.
+3. Prices, stock, permissions, policy, and quantities are determined by live
+   ERP data and versioned code.
+4. Write actions use idempotency, preview, approval where required, and live
+   revalidation.
+5. Companies and warehouses remain explicit security boundaries.
+6. No autonomous module generation or unrestricted tool execution is allowed.
+
+## Approved evolution
+
+The next implementation phase introduces a separately deployed Agent Runtime
+microservice. Frappe remains the gateway and durable boundary for Agent Run,
+Agent Step, Action Proposal, Approval Decision, company policy, permissions,
+deterministic tools, and ERP transactions. The runtime never connects directly
+to the ERP database.
+
+The phase after that evolves the existing AI Cockpit into a company-isolated
+inventory control tower. Implementation order, service APIs, schemas, rollout,
+and acceptance criteria are defined in the
+[canonical handoff](AI_HANDOFF/README.md).

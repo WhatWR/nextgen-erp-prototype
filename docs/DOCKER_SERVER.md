@@ -1,5 +1,7 @@
 # Deploy NextGen ERP with Docker Compose
 
+> **Document status:** Current deployment and operations guide. Target platform decisions are maintained in the [canonical AI handoff](AI_HANDOFF/README.md).
+
 This stack is intended for a single Linux server. It runs ERPNext, Frappe CRM,
 Frappe HRMS (HR and Payroll), the NextGen Frappe app, MariaDB, Redis, workers,
 scheduler, websocket, LINE order intake and Caddy HTTPS. Only ports 80 and 443

@@ -126,6 +126,8 @@ services:
             || bench --site "$${SITE_NAME}" install-app crm;
           bench --site "$${SITE_NAME}" list-apps | grep -qw erpnext_thailand \
             || bench --site "$${SITE_NAME}" install-app erpnext_thailand;
+          bench --site "$${SITE_NAME}" list-apps | grep -qw nextgen_erp \
+            || bench --site "$${SITE_NAME}" install-app nextgen_erp;
           bench --site "$${SITE_NAME}" migrate;
         fi;
         bench --site "$${SITE_NAME}" set-config host_name "$${PUBLIC_URL}";
@@ -215,7 +217,9 @@ services:
     environment:
       SITE_NAME: ${SITE_NAME:?Set SITE_NAME in .env.server}
     ports:
-      - "127.0.0.1:${HTTP_PORT:-8180}:8080"
+      # Loopback-only by default. Set HTTP_BIND=0.0.0.0 to reach the gateway
+      # from outside the container host (e.g. Windows -> WSL podman machine).
+      - "${HTTP_BIND:-127.0.0.1}:${HTTP_PORT:-8180}:8080"
     volumes:
       - ./docker/Caddyfile.gateway:/etc/caddy/Caddyfile:ro
     depends_on:

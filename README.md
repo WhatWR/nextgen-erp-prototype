@@ -1,5 +1,7 @@
 # NextGen ERP Thailand
 
+> **Document status:** Repository overview of the current prototype. Start with the [canonical AI handoff](docs/AI_HANDOFF/README.md) for current state, locked decisions, and the next implementation phases.
+
 An ERPNext-first prototype for receiving Thai orders from LINE OA and running
 them through a confidence-gated order-to-cash workflow.
 
@@ -22,6 +24,11 @@ them through a confidence-gated order-to-cash workflow.
   payment status, FAQ via RAG) and can re-send the invoice + PromptPay QR —
   through the same secured ERPNext methods only. See
   [docs/AI_ASSISTANT.md](docs/AI_ASSISTANT.md).
+- **Agent Runtime** is a separately deployed orchestration microservice that owns
+  model calls, prompt versions and the tool loop. It holds no ERP data and
+  reaches ERPNext only through versioned, allowlisted Frappe gateway methods
+  with company-scoped policy, proposals and human approval. Disabled by default;
+  see [docs/AGENT_RUNTIME.md](docs/AGENT_RUNTIME.md).
 - **Typhoon Staff Chat** is a Desk-wide sales copilot for authenticated staff.
   It reads live ERP data and prepares confirmation cards; only ERPNext can
   submit/reserve a high-confidence order. See
@@ -122,3 +129,6 @@ The technical order-to-cash prototype is working, but production launch still
 requires Thai tax/accounting validation, PDPA controls, backups, observability,
 public TLS infrastructure and real LINE credentials. Review
 [Thailand launch gates](docs/THAILAND_LAUNCH_GATES.md) before a live pilot.
+The approved next implementation work is the generic Frappe agent platform,
+followed by the multi-company inventory control tower. Do not infer those target
+capabilities from the current code; use the [AI/SCM handoff](docs/AI_HANDOFF/README.md).

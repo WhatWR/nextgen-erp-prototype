@@ -1,0 +1,4 @@
+services:
+  gateway:
+    ports:
+      - "8180:8080"

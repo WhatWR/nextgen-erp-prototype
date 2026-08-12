@@ -1,5 +1,7 @@
 # Local Sandbox Simulator
 
+> **Document status:** Current local test and simulation guide. Target acceptance coverage is defined in the [canonical acceptance tests](AI_HANDOFF/ACCEPTANCE_TESTS.md).
+
 `scripts/sandbox.py` is a single stdlib process that stands in for every third
 party the stack talks to, so the **entire order-to-cash + AI assistant flow can
 be rehearsed locally before deploying** — no LINE OA, no LLM key, no slip

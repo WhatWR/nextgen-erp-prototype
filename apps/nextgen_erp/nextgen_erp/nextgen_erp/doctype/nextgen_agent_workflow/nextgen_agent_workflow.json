@@ -1,0 +1,32 @@
+{
+ "actions": [],
+ "autoname": "format:WF-{#####}",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["title", "company", "enabled", "column_break_general", "graph_version", "last_run", "total_runs", "section_description", "description", "section_graph", "graph_json"],
+ "fields": [
+  {"fieldname": "title", "fieldtype": "Data", "in_list_view": 1, "label": "Title", "reqd": 1},
+  {"description": "A workflow, its runs and every proposal it produces stay inside this company.", "fieldname": "company", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "Company", "options": "Company", "reqd": 1},
+  {"default": "0", "description": "A disabled workflow can be edited but never executed.", "fieldname": "enabled", "fieldtype": "Check", "in_list_view": 1, "label": "Enabled"},
+  {"fieldname": "column_break_general", "fieldtype": "Column Break"},
+  {"default": "1", "description": "Incremented on every save so a run records which definition it executed.", "fieldname": "graph_version", "fieldtype": "Int", "label": "Graph Version", "read_only": 1},
+  {"fieldname": "last_run", "fieldtype": "Link", "label": "Last Run", "options": "NextGen Agent Run", "read_only": 1},
+  {"default": "0", "fieldname": "total_runs", "fieldtype": "Int", "label": "Total Runs", "read_only": 1},
+  {"fieldname": "section_description", "fieldtype": "Section Break"},
+  {"fieldname": "description", "fieldtype": "Small Text", "label": "Description"},
+  {"fieldname": "section_graph", "fieldtype": "Section Break", "label": "Graph"},
+  {"description": "Nodes and edges in the designer's format. Validated on save: known agents only, no duplicate node IDs, no dangling edges, no cycles.", "fieldname": "graph_json", "fieldtype": "JSON", "label": "Graph", "reqd": 1}
+ ],
+ "links": [{"group": "Runs", "link_doctype": "NextGen Agent Run", "link_fieldname": "workflow"}],
+ "module": "NextGen ERP",
+ "name": "NextGen Agent Workflow",
+ "permissions": [
+  {"create": 1, "delete": 1, "read": 1, "report": 1, "role": "System Manager", "write": 1},
+  {"read": 1, "role": "NextGen Agent Runtime"}
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "title",
+ "track_changes": 1
+}

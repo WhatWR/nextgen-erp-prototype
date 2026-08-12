@@ -195,6 +195,12 @@ scheduler_events = {
 		# Respects enable_procurement_copilot + enable_scheduled_forecast flags.
 		"nextgen_erp.procurement.run_scheduled_forecast",
 	],
+	# Redeliver runs the runtime never acknowledged, expire proposals and fail
+	# runs that were claimed but never reported back. Runtime unavailability
+	# must leave an observable, recoverable state rather than a stuck run.
+	"cron": {
+		"*/5 * * * *": ["nextgen_erp.agent_gateway.dispatch.maintenance"],
+	},
 }
 
 # Testing

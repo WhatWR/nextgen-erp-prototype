@@ -1,5 +1,7 @@
 # Architecture Review (Phase 1 baseline — July 2026)
 
+> **Document status:** Current capability baseline and historical architecture review. The authoritative target architecture is in the [canonical AI handoff](AI_HANDOFF/README.md).
+
 A snapshot of the system as reviewed before the LINE AI assistant phase, kept
 as the shared mental model for future work. Companion docs:
 [ERPNEXT_MIGRATION.md](ERPNEXT_MIGRATION.md) (integration/ops),
@@ -72,3 +74,5 @@ so ERPClaw can plug back in later without rework.
 Every new capability lands as a whitelisted `nextgen_erp` service method
 first; AI surfaces (assistant tools today, MCP tools later) only ever call
 those methods. AI never touches the database.
+
+This review predates the generic agent-platform decision. Where its future-work language differs from docs/AI_HANDOFF/, the handoff is authoritative.

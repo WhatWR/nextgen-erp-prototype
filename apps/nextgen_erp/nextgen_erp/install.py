@@ -14,6 +14,28 @@ def _ensure_role() -> None:
 		frappe.get_doc({"doctype": "Role", "role_name": SERVICE_ROLE, "desk_access": 0}).insert()
 
 
+def _ensure_agent_gateway() -> None:
+	"""Phase 1 agent-gateway setup: the restricted role and one policy per company.
+
+	Runs last and never raises. The agent gateway ships disabled, so a problem
+	here must not stop the invariants the running product depends on — custom
+	fields, print formats, workspaces and the Desk launcher.
+	"""
+	try:
+		from nextgen_erp.agent_gateway import policy
+		from nextgen_erp.agent_gateway.permissions import ensure_runtime_role
+
+		ensure_runtime_role()
+		if not frappe.db.exists("DocType", policy.POLICY_DOCTYPE):
+			return
+		for company in frappe.get_all("Company", pluck="name"):
+			policy.ensure_policy(company)
+	except Exception:
+		frappe.log_error(
+			title="NextGen agent gateway setup", message=frappe.get_traceback()
+		)
+
+
 def _ensure_custom_fields() -> None:
 	reference_field = {
 		"fieldname": "custom_nextgen_external_reference",
@@ -156,12 +178,22 @@ def after_install() -> None:
 	from nextgen_erp.print_formats import ensure_print_formats
 
 	ensure_print_formats()
+	# The Desk launcher group and the procurement workspace are database-backed
+	# rather than exported as Workspace JSON, so a fresh `install-app` has to
+	# build them here too. Without this, installing the app leaves only the
+	# fixture-synced AI Sales Copilot workspace and no NextGen launcher group
+	# until someone happens to run `bench migrate`.
+	from nextgen_erp.setup_doctypes import _desk_tile, _procurement_workspace
+
+	_procurement_workspace()
+	_desk_tile()
 	from nextgen_erp.store_landing import ensure_store_landing_page
 
 	ensure_store_landing_page()
 	from nextgen_erp.website_theme import ensure_website_theme
 
 	ensure_website_theme()
+	_ensure_agent_gateway()
 
 
 def after_migrate() -> None:
@@ -187,3 +219,4 @@ def after_migrate() -> None:
 	from nextgen_erp.website_theme import ensure_website_theme
 
 	ensure_website_theme()
+	_ensure_agent_gateway()

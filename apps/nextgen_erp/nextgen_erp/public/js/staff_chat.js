@@ -677,9 +677,47 @@
 		</section>`;
 	}
 
+	function documentActionCard(action) {
+		const preview = action.preview || {};
+		const values = preview.values || {};
+		const rows = Object.keys(values)
+			.map(
+				(field) =>
+					`<tr><td>${escapeHtml(field)}</td><td>${escapeHtml(String(values[field] ?? ""))}</td></tr>`,
+			)
+			.join("");
+		const warnings = (action.warnings || preview.warnings || [])
+			.map((warning) => `<li>${escapeHtml(warning)}</li>`)
+			.join("");
+		const status = action.status || "Pending Approval";
+		const result = action.result || {};
+		const resultType = action.result_doctype || result.document_type;
+		const resultName = action.result_name || result.document_name;
+		// The proposal ID is the identifier here; there is no legacy chat action.
+		const id = action.proposal_id || action.action_id;
+		const open = status === "Pending Approval" || status === "Pending";
+		return `<section class="ng-action-card ng-document-card" data-action-id="${escapeHtml(id)}">
+			<div class="ng-action-title"><strong>${escapeHtml(preview.doctype || "Document")}</strong><span>ข้อเสนอ</span></div>
+			<div class="ng-action-customer">
+				บริษัท: ${escapeHtml(preview.company || "-")}${preview.purpose ? `<br>${escapeHtml(preview.purpose)}` : ""}
+			</div>
+			<table><tbody>${rows}</tbody></table>
+			<div class="ng-action-total">ยังไม่บันทึกลง ERP จนกว่าคุณจะกดอนุมัติ</div>
+			${warnings ? `<ul class="ng-action-warnings">${warnings}</ul>` : ""}
+			<div class="ng-action-buttons" ${open ? "" : "hidden"}>
+				<button data-approve-proposal="${escapeHtml(id)}">อนุมัติและสร้าง</button>
+				<button class="secondary" data-reject-proposal="${escapeHtml(id)}">ปฏิเสธ</button>
+			</div>
+			<div class="ng-action-result">${!open ? escapeHtml(status) : ""}${resultType && resultName ? ` · <button class="ng-doc-link" data-document-type="${escapeHtml(resultType)}" data-document-name="${escapeHtml(resultName)}">${escapeHtml(resultName)}</button>` : ""}</div>
+		</section>`;
+	}
+
 	function actionCard(action) {
 		if (!action?.preview) return "";
 		const type = action.action_type || "prepare_sales_order";
+		if (type === "prepare_document") {
+			return documentActionCard(action);
+		}
 		if (type === "prepare_purchase_order" || type === "prepare_material_request") {
 			return procurementActionCard(action);
 		}
@@ -739,6 +777,10 @@
 		if (edit) return editAction(edit.dataset.editAction);
 		const cancel = event.target.closest("[data-cancel-action]");
 		if (cancel) return cancelAction(cancel.dataset.cancelAction);
+		const approve = event.target.closest("[data-approve-proposal]");
+		if (approve) return approveProposal(approve.dataset.approveProposal);
+		const reject = event.target.closest("[data-reject-proposal]");
+		if (reject) return rejectProposal(reject.dataset.rejectProposal);
 		const useSup = event.target.closest("[data-use-supplier]");
 		if (useSup) return useSupplier(useSup.dataset.useSupplier, useSup.dataset.useItem);
 		const link = event.target.closest("[data-document-type]");
@@ -1040,6 +1082,61 @@
 			frappe.msgprint(error?.message || "ดำเนินการไม่สำเร็จ");
 		}
 		render();
+	}
+
+	const GATEWAY = "nextgen_erp.agent_gateway.api.";
+
+	async function approveProposal(proposalId) {
+		const action = state.actions.get(proposalId);
+		if (action) {
+			action.status = "Executing";
+			render();
+		}
+		try {
+			// Approval is checked against the snapshot the card was rendered
+			// from; a stale preview is rejected rather than silently executed.
+			await frappe.call({
+				method: `${GATEWAY}approve_proposal`,
+				args: { proposal_id: proposalId, snapshot_hash: action?.snapshot_hash },
+			});
+			const response = await frappe.call({
+				method: `${GATEWAY}execute_proposal`,
+				args: { proposal_id: proposalId },
+			});
+			const result = response.message || {};
+			if (action) {
+				action.status = "Completed";
+				action.result = result;
+				action.result_doctype = result.document_type;
+				action.result_name = result.document_name;
+			}
+			state.messages.push({
+				role: "assistant",
+				content: `สร้าง ${result.document_type} แล้ว: ${result.document_name}`,
+				href: true,
+				documentType: result.document_type,
+				documentName: result.document_name,
+			});
+			frappe.show_alert({ message: "สร้างเอกสารสำเร็จ", indicator: "green" });
+		} catch (error) {
+			if (action) action.status = "Pending Approval";
+			frappe.msgprint(error?.message || "อนุมัติไม่สำเร็จ");
+		}
+		render();
+	}
+
+	async function rejectProposal(proposalId) {
+		try {
+			await frappe.call({
+				method: `${GATEWAY}reject_proposal`,
+				args: { proposal_id: proposalId },
+			});
+			const action = state.actions.get(proposalId);
+			if (action) action.status = "Rejected";
+			render();
+		} catch (error) {
+			frappe.msgprint(error?.message || "ปฏิเสธไม่สำเร็จ");
+		}
 	}
 
 	async function cancelAction(actionId) {

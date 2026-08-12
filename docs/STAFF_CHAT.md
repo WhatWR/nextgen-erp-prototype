@@ -1,5 +1,7 @@
 # NextGen Staff Chat (Typhoon AI)
 
+> **Document status:** Current Staff Chat and Sales Copilot capability. The reusable agent-runtime target is defined in [Phase 1](AI_HANDOFF/PHASE_1_AGENT_PLATFORM.md).
+
 NextGen Staff Chat is an authenticated assistant embedded in every ERPNext Desk
 page. It reads live ERPNext data through an explicit tool allowlist and can
 prepare a Sales Order preview. The model never writes ERP documents directly.
@@ -90,3 +92,5 @@ bench --site nextgen.localhost set-config allow_tests true
 bench --site nextgen.localhost run-tests --app nextgen_erp
 bench --site nextgen.localhost set-config allow_tests false
 ```
+
+The current chat-specific session/action implementation is preserved during Phase 1 compatibility migration. New SCM agents must target the generic run and proposal contracts rather than extending NextGen Chat Action.

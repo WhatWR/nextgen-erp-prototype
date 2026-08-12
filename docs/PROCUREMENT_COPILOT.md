@@ -1,5 +1,7 @@
 # AI Procurement Copilot (NextGen AI)
 
+> **Document status:** Current procurement capability. The inventory-control-tower target is defined in [Phase 2](AI_HANDOFF/PHASE_2_INVENTORY_CONTROL_TOWER.md).
+
 The bottom-right assistant is now a multi-agent panel called **NextGen AI**
 with two agents:
 
@@ -110,3 +112,5 @@ bench --site <site> run-tests --app nextgen_erp \
 bench --site <site> run-tests --app nextgen_erp \
   --module nextgen_erp.tests.test_procurement
 ```
+
+nextgen-procurement-v1 remains unchanged during Phase 1 and is reused as the first deterministic demand input in Phase 2. This guide describes the current global settings and Chat Action behavior, not the approved company-policy and generic proposal target.

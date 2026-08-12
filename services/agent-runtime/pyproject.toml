@@ -1,0 +1,20 @@
+[project]
+name = "nextgen-agent-runtime"
+version = "0.1.0"
+description = "NextGen ERP Agent Runtime: orchestration and model interaction only"
+requires-python = ">=3.11"
+# Deliberately dependency-free. The runtime must be deployable and testable
+# without pulling a web framework into the ERP trust boundary; an ASGI server
+# (uvicorn, hypercorn, ...) is supplied by the deployment image, not the code.
+dependencies = []
+
+[tool.unittest]
+start-directory = "tests"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["F", "E", "W", "I", "UP", "B", "RUF"]
+ignore = ["B904", "E501"]

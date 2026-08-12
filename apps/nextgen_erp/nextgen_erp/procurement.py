@@ -940,8 +940,22 @@ def _build_procurement_lines(
 
 def _create_action(
 	*, action_type: str, arguments: dict, preview: dict, warnings: list[str], score: float,
-	user: str, session_id: str,
+	user: str, session_id: str | None,
 ) -> dict:
+	if not session_id:
+		# Gateway-driven runs (schedule, webhook, document event) have no chat
+		# session. The generic NextGen Action Proposal is the durable record
+		# instead; the caller builds it from this preview-only result.
+		return {
+			"action_id": None,
+			"action_type": action_type,
+			"status": "Preview",
+			"expires_at": None,
+			"preview": preview,
+			"proposal_payload": arguments,
+			"warnings": warnings,
+			"confidence": score,
+		}
 	action = frappe.get_doc(
 		{
 			"doctype": "NextGen Chat Action",
@@ -1197,7 +1211,7 @@ def _prepare_material_request(arguments: dict, *, user: str, session_id: str) ->
 # ---------------------------------------------------------------------------
 
 
-def dispatch_tool(name: str, arguments: dict, *, user: str, session_id: str) -> dict:
+def dispatch_tool(name: str, arguments: dict, *, user: str, session_id: str, run=None) -> dict:
 	if name == "search_suppliers":
 		return {"suppliers": _search_suppliers(str(arguments.get("query") or ""), arguments.get("limit") or 5)}
 	if name == "search_procurement_items":

@@ -1,5 +1,7 @@
 # Thailand launch gates
 
+> **Document status:** Current launch-readiness and compliance checklist. Product scope and rollout guardrails are maintained in the [canonical AI handoff](AI_HANDOFF/README.md).
+
 The prototype is an operational overlay. Before it becomes a legal system of
 record, obtain written validation and test evidence for each gate below.
 

@@ -108,6 +108,11 @@ def _desk_tile():
             "header_icon": "chart",
             "items": [
                 {"type": "Link", "label": AI_COCKPIT, "link_type": "Page", "link_to": "ai-cockpit", "icon": "chart", "idx": 1},
+                {"type": "Link", "label": "Agent Workflows", "link_type": "Page", "link_to": "agent-workflow", "icon": "branch", "idx": 2},
+                {"type": "Link", "label": "Agent Runs", "link_type": "DocType", "link_to": "NextGen Agent Run", "icon": "list", "idx": 3},
+                {"type": "Link", "label": "Action Proposals", "link_type": "DocType", "link_to": "NextGen Action Proposal", "icon": "review", "idx": 4},
+                {"type": "Link", "label": "Automation Policy", "link_type": "DocType", "link_to": "NextGen Automation Policy", "icon": "setting", "idx": 5},
+                {"type": "Link", "label": "AI Assistant Settings", "link_type": "DocType", "link_to": "NextGen AI Settings", "icon": "user-cog", "idx": 6},
             ],
         }
     )

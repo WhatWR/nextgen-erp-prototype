@@ -15,7 +15,14 @@
   "max_tool_calls",
   "daily_message_cap",
   "staff_chat_daily_turn_cap",
-  "chat_history_retention_days"
+  "chat_history_retention_days",
+  "section_agent_runtime",
+  "enable_agent_runtime",
+  "agent_runtime_url",
+  "agent_runtime_token",
+  "column_break_agent_runtime",
+  "agent_runtime_service_user",
+  "agent_runtime_legacy_rollback"
  ],
  "fields": [
   {
@@ -97,6 +104,48 @@
    "fieldname": "chat_history_retention_days",
    "fieldtype": "Int",
    "label": "Chat History Retention (Days)"
+  },
+  {
+   "fieldname": "section_agent_runtime",
+   "fieldtype": "Section Break",
+   "label": "Agent Runtime Microservice"
+  },
+  {
+   "default": "0",
+   "description": "Deployment switch for the separate Agent Runtime service. Each company must also enable it in its NextGen Automation Policy.",
+   "fieldname": "enable_agent_runtime",
+   "fieldtype": "Check",
+   "label": "Enable Agent Runtime"
+  },
+  {
+   "description": "Private base URL of the Agent Runtime, for example https://agent-runtime.internal:8400. Browser, LINE and Desk clients never call it directly.",
+   "fieldname": "agent_runtime_url",
+   "fieldtype": "Data",
+   "label": "Agent Runtime URL"
+  },
+  {
+   "description": "Dispatch credential presented to the runtime. Rotated separately from the runtime's own Frappe API key.",
+   "fieldname": "agent_runtime_token",
+   "fieldtype": "Password",
+   "label": "Agent Runtime Service Token"
+  },
+  {
+   "fieldname": "column_break_agent_runtime",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Restricted, non-Desk user holding the NextGen Agent Runtime role. Used when a company policy does not name its own service user.",
+   "fieldname": "agent_runtime_service_user",
+   "fieldtype": "Link",
+   "label": "Runtime Service User",
+   "options": "User"
+  },
+  {
+   "default": "0",
+   "description": "Transition-only operator switch that restores the embedded orchestration route. A runtime failure must never set this automatically.",
+   "fieldname": "agent_runtime_legacy_rollback",
+   "fieldtype": "Check",
+   "label": "Legacy Orchestration Rollback"
   }
  ],
  "issingle": 1,

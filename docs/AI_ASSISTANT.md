@@ -1,5 +1,7 @@
 # LINE AI Assistant (LLM + RAG)
 
+> **Document status:** Current LINE customer-assistant capability. Future agent-platform behavior is defined in the [canonical AI handoff](AI_HANDOFF/README.md).
+
 The assistant answers customer questions on the LINE chat — product/price/stock,
 order and payment status, FAQ — and can re-send the invoice with its PromptPay
 QR so the customer can pay. It never replaces the order pipeline: messages with
@@ -93,3 +95,5 @@ New suites: `tests/test_ai_assistant.py` (loop, fallback, routing, injection),
 `tests/test_ai_tools.py` (scoping, soft errors), `tests/test_ai_rag.py`
 (chunking, embeddings + fallback ranking). ERPNext-side tests are colocated
 with the new DocTypes and run via `bench run-tests --app nextgen_erp`.
+
+The assistant remains a supported channel during the Phase 1 runtime refactor; its public behavior and sender-scoping contract must not change.
