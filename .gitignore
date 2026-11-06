@@ -12,3 +12,5 @@ erpclaw_integration.json
 __pycache__/
 *.py[cod]
 .vite/
+.codex/
+.codex_tmp/

@@ -54,6 +54,22 @@ PROPOSAL_STATUSES = (
 APPROVAL_DECISIONS = ("Approve", "Reject", "Request Changes")
 RISK_LEVELS = ("Low", "Medium", "High")
 TOOL_RESULT_STATUSES = ("ok", "error", "rejected")
+# A workflow node has its own lifecycle, which is not a run lifecycle: a node
+# may be satisfied by a child agent run, by a deterministic source or sink that
+# Frappe executed, or by a proposal a human has since approved.
+NODE_STATUSES = (
+    "Pending",
+    "Running",
+    "Waiting Approval",
+    "Completed",
+    "Failed",
+    "Cancelled",
+)
+# Node kinds the designer may place on the canvas. "agent" runs a registered
+# agent as its own child run. Every other kind is a deterministic step that
+# Frappe executes itself: the runtime has no file, network or database access
+# of its own and must never acquire any.
+NODE_KINDS = ("agent", "source.query", "source.excel", "source.api", "sink.report")
 
 _ID = {"type": "string", "minLength": 1, "maxLength": 140}
 _OPTIONAL_ID = {"type": ["string", "null"], "maxLength": 140}
@@ -270,6 +286,78 @@ SCHEMAS: dict[str, dict[str, Any]] = {
             "idempotency_key": _ID,
         },
         ["contract_version", "parent_run_id", "node_id", "agent_type", "input", "idempotency_key"],
+    ),
+    # v2: a node envelope. Deterministic nodes return one of these and agent
+    # nodes are summarised into the same shape, so a downstream node reads its
+    # inputs the same way whatever produced them.
+    "node_envelope": _schema(
+        {
+            "node_id": _ID,
+            "node_kind": {"type": "string", "enum": list(NODE_KINDS)},
+            "label": _TEXT,
+            # Human-readable summary. An agent node's answer; a source's shape.
+            "text": _TEXT,
+            # Structured rows or fields. Bounded and redacted before it is stored.
+            "data": {"type": "array", "items": _OBJECT},
+            "row_count": {"type": "integer", "minimum": 0},
+            "truncated": {"type": "boolean"},
+            # ERP documents this node produced or read, as {doctype, name}.
+            "documents": {"type": "array", "items": _OBJECT},
+            # Files this node wrote, as Frappe file URLs.
+            "artifacts": {"type": "array", "items": {"type": "string", "maxLength": 500}},
+        },
+        ["node_id", "node_kind"],
+    ),
+    # v2: the runtime asks Frappe to execute one deterministic node.
+    # The runtime supplies only *which* node to run. Frappe re-reads the node
+    # from the stored graph and rebuilds its inputs from the outputs it already
+    # persisted, so no URL, query, file or upstream payload is ever taken from
+    # the caller.
+    "execute_node_request": _schema(
+        {
+            "contract_version": _VERSION,
+            "parent_run_id": _ID,
+            "node_id": _ID,
+            "idempotency_key": _ID,
+        },
+        ["contract_version", "parent_run_id", "node_id", "idempotency_key"],
+    ),
+    "node_result": _schema(
+        {
+            "node_id": _ID,
+            "status": {"type": "string", "enum": list(NODE_STATUSES)},
+            "output": _OPTIONAL_OBJECT,
+            "error": _TEXT,
+            "replayed": {"type": "boolean"},
+        },
+        ["node_id", "status", "replayed"],
+    ),
+    # v2: what the graph has already achieved. A workflow that parked for an
+    # approval resumes in a *new* process, so the outputs earlier nodes produced
+    # must be read back from Frappe rather than remembered.
+    "workflow_state_request": _schema(
+        {"contract_version": _VERSION, "parent_run_id": _ID},
+        ["contract_version", "parent_run_id"],
+    ),
+    "workflow_state": _schema(
+        {
+            "contract_version": _VERSION,
+            "run_id": _ID,
+            "status": {"type": "string", "enum": list(RUN_STATUSES)},
+            "nodes": {
+                "type": "array",
+                "items": _schema(
+                    {
+                        "node_id": _ID,
+                        "status": {"type": "string", "enum": list(NODE_STATUSES)},
+                        "output": _OPTIONAL_OBJECT,
+                        "error": _TEXT,
+                    },
+                    ["node_id", "status"],
+                ),
+            },
+        },
+        ["contract_version", "run_id", "status", "nodes"],
     ),
 }
 

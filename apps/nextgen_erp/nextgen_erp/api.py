@@ -28,7 +28,6 @@ import time
 from urllib.parse import quote, urlparse
 
 import frappe
-import requests
 from frappe import _
 from frappe.utils import flt, getdate, get_url, now_datetime, nowdate
 
@@ -1378,19 +1377,9 @@ def handle_line_payment_slip(
     if not name:
         return {"handled": False, "reason": "no_invoice_awaiting_payment"}
     doc = frappe.get_doc("AI Order Intake", name)
-    line_settings = frappe.get_single("LINE Channel Settings")
-    access_token = line_settings.get_password("channel_access_token", raise_exception=False) or ""
-    if not access_token:
-        frappe.throw(_("LINE Channel Access Token is required to download payment slips"))
-    from nextgen_erp.line import data_api_base
+    from nextgen_erp.line import fetch_message_content
 
-    response = requests.get(
-        f"{data_api_base()}/v2/bot/message/{quote(message_id, safe='')}/content",
-        headers={"Authorization": f"Bearer {access_token}"},
-        timeout=30,
-    )
-    response.raise_for_status()
-    content = response.content
+    content = fetch_message_content(message_id, line_id)
     if not content or len(content) > 10 * 1024 * 1024:
         frappe.throw(_("Payment slip must be a non-empty image smaller than 10 MB"))
     file_doc = frappe.get_doc(

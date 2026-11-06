@@ -383,6 +383,7 @@ def reject(proposal_id: str, reason: str | None = None) -> dict[str, Any]:
 		frappe.throw(_("This proposal can no longer be rejected"))
 	decision_id = _record_decision(proposal, user, "Reject", reason)
 	proposal.db_set("status", "Rejected")
+	_settle_workflow(proposal)
 	if proposal.legacy_chat_action:
 		legacy_status = frappe.db.get_value(
 			CHAT_ACTION_DOCTYPE, proposal.legacy_chat_action, "status"
@@ -478,7 +479,13 @@ def execute(proposal_id: str, idempotency_key: str | None = None) -> dict[str, A
 
 	proposal.db_set("status", "Executing", update_modified=False)
 	try:
-		result = executor(proposal)
+		# A document a workflow proposed must not retrigger that workflow's own
+		# document-event trigger; the graph's output is not a new event.
+		frappe.flags.in_nextgen_proposal_execution = True
+		try:
+			result = executor(proposal)
+		finally:
+			frappe.flags.in_nextgen_proposal_execution = False
 	except Exception as exc:
 		proposal.db_set(
 			{"status": "Failed", "result_json": _dump({"error": redact_error(exc)})}
@@ -495,6 +502,9 @@ def execute(proposal_id: str, idempotency_key: str | None = None) -> dict[str, A
 		}
 	)
 	frappe.db.commit()
+	# The document now exists, so a workflow that parked on this proposal has
+	# what the rest of its graph was waiting for.
+	_settle_workflow(proposal)
 	return {
 		"proposal_id": proposal.name,
 		"status": "Completed",
@@ -502,6 +512,23 @@ def execute(proposal_id: str, idempotency_key: str | None = None) -> dict[str, A
 		"document_name": result.get("document_name"),
 		"result": result,
 	}
+
+
+def _settle_workflow(proposal) -> None:
+	"""Resume or end the workflow this proposal parked, if it belongs to one.
+
+	Failing to resume must never fail the decision the human just made: the
+	proposal is settled either way, and an unresumed parent stays visible in
+	Waiting Approval rather than disappearing.
+	"""
+	from nextgen_erp.agent_gateway import workflows
+
+	try:
+		workflows.resume_after_proposal(proposal)
+	except Exception as exc:
+		frappe.log_error(
+			title=f"NextGen workflow resume {proposal.name}", message=redact_error(exc)
+		)
 
 
 # ---------------------------------------------------------------------------

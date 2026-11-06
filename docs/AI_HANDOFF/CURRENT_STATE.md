@@ -37,6 +37,7 @@ Implemented components include:
 - Separately deployed Agent Runtime microservice with the Frappe agent gateway, generic Agent Run, Agent Step, Action Proposal, Approval Decision, and company-scoped Automation Policy records. Every switch ships disabled; see [the runtime guide](../AGENT_RUNTIME.md).
 - An `assistant` agent that proposes any document the user's role permits, behind a code-level denylist, a policy allowlist, a rolled-back controller preview and human approval.
 - A visual agent workflow designer (Desk page `agent-workflow`) with a graph executor in the runtime. See [Phase 3](PHASE_3_AGENT_WORKSPACE.md).
+- A demo-only LINE simulator page (`/line-sim`) that stands in for the LINE app while driving the real signed-webhook path. It ships disabled behind a site config flag; see [the simulator guide](../LINE_SIMULATOR.md).
 
 ## Safeguards to preserve
 

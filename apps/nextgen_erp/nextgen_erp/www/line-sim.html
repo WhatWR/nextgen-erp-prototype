@@ -1,0 +1,527 @@
+{% extends "templates/web.html" %}
+
+{% block title %}LINE Simulator{% endblock %}
+
+{% block page_content %}
+<style>
+.ng-sim {
+	--sim-brand: #12855c;
+	--sim-brand-dark: #0d6a49;
+	--sim-canvas: #e7ecf1;
+	--sim-bubble-in: #ffffff;
+	--sim-bubble-out: #cfeecd;
+	--sim-ink: #1b2733;
+	--sim-muted: #6b7a89;
+	--sim-line: #d9e0e7;
+	display: grid;
+	grid-template-columns: minmax(320px, 400px) minmax(280px, 1fr);
+	gap: 24px;
+	align-items: start;
+	margin: 24px auto 48px;
+	max-width: 1080px;
+	color: var(--sim-ink);
+}
+@media (max-width: 900px) {
+	.ng-sim { grid-template-columns: 1fr; }
+}
+
+.ng-sim-banner {
+	max-width: 1080px;
+	margin: 24px auto 0;
+	padding: 10px 14px;
+	border: 1px solid #f0d8a8;
+	background: #fdf6e6;
+	border-radius: 8px;
+	font-size: 13px;
+	color: #6b5624;
+}
+
+/* ---- phone ---- */
+.ng-phone {
+	border: 1px solid var(--sim-line);
+	border-radius: 18px;
+	overflow: hidden;
+	background: var(--sim-canvas);
+	box-shadow: 0 10px 30px rgba(16, 32, 48, .12);
+	display: flex;
+	flex-direction: column;
+	height: 640px;
+}
+.ng-phone-head {
+	background: var(--sim-brand);
+	color: #fff;
+	padding: 12px 16px;
+	display: flex;
+	align-items: center;
+	gap: 10px;
+}
+.ng-avatar {
+	width: 32px; height: 32px;
+	border-radius: 50%;
+	background: rgba(255,255,255,.22);
+	display: grid; place-items: center;
+	font-weight: 700; font-size: 14px;
+}
+.ng-phone-head h2 { font-size: 15px; margin: 0; font-weight: 600; }
+.ng-phone-head small { opacity: .82; font-size: 11px; }
+
+.ng-thread {
+	flex: 1;
+	overflow-y: auto;
+	padding: 14px;
+	display: flex;
+	flex-direction: column;
+	gap: 10px;
+}
+.ng-msg { max-width: 82%; display: flex; flex-direction: column; gap: 4px; }
+.ng-msg.in { align-self: flex-start; }
+.ng-msg.out { align-self: flex-end; align-items: flex-end; }
+.ng-bubble {
+	padding: 9px 12px;
+	border-radius: 14px;
+	font-size: 14px;
+	line-height: 1.5;
+	white-space: pre-wrap;
+	word-break: break-word;
+	background: var(--sim-bubble-in);
+	box-shadow: 0 1px 2px rgba(16,32,48,.10);
+}
+.ng-msg.out .ng-bubble { background: var(--sim-bubble-out); }
+.ng-bubble a { color: var(--sim-brand-dark); text-decoration: underline; }
+.ng-bubble img { display: block; margin-top: 8px; max-width: 200px; border-radius: 10px; }
+.ng-stamp { font-size: 10px; color: var(--sim-muted); }
+.ng-system {
+	align-self: center;
+	max-width: 92%;
+	background: #fde8e8;
+	border: 1px solid #f5c2c2;
+	color: #8c2f2f;
+	font-size: 12px;
+	padding: 8px 12px;
+	border-radius: 10px;
+	white-space: pre-wrap;
+}
+.ng-empty { color: var(--sim-muted); font-size: 13px; text-align: center; margin: auto; }
+
+.ng-presets { display: flex; flex-wrap: wrap; gap: 6px; padding: 8px 10px 0; }
+.ng-chip {
+	border: 1px solid var(--sim-line);
+	background: #fff;
+	border-radius: 999px;
+	padding: 5px 11px;
+	font-size: 12px;
+	cursor: pointer;
+	color: var(--sim-ink);
+}
+.ng-chip:hover { border-color: var(--sim-brand); color: var(--sim-brand-dark); }
+.ng-chip[disabled] { opacity: .5; cursor: progress; }
+
+.ng-compose {
+	display: flex;
+	gap: 8px;
+	padding: 10px;
+	background: #fff;
+	border-top: 1px solid var(--sim-line);
+}
+.ng-compose input[type="text"] {
+	flex: 1;
+	border: 1px solid var(--sim-line);
+	border-radius: 999px;
+	padding: 9px 14px;
+	font-size: 14px;
+	min-width: 0;
+}
+.ng-compose button {
+	border: 0;
+	border-radius: 999px;
+	padding: 9px 16px;
+	font-size: 14px;
+	background: var(--sim-brand);
+	color: #fff;
+	cursor: pointer;
+}
+.ng-compose button.ghost {
+	background: #fff;
+	color: var(--sim-muted);
+	border: 1px solid var(--sim-line);
+	padding: 9px 12px;
+}
+.ng-compose button[disabled] { opacity: .55; cursor: progress; }
+
+/* ---- side ---- */
+.ng-side { display: flex; flex-direction: column; gap: 16px; }
+.ng-card {
+	border: 1px solid var(--sim-line);
+	border-radius: 12px;
+	background: #fff;
+	overflow: hidden;
+}
+.ng-card-head {
+	padding: 10px 14px;
+	border-bottom: 1px solid var(--sim-line);
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 8px;
+}
+.ng-card-head h3 { margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; color: var(--sim-muted); }
+.ng-card-body { padding: 12px 14px; font-size: 13px; }
+.ng-order { border-bottom: 1px solid var(--sim-line); padding-bottom: 10px; margin-bottom: 10px; }
+.ng-order:last-child { border-bottom: 0; padding-bottom: 0; margin-bottom: 0; }
+.ng-order-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 6px; }
+.ng-order-top strong { font-size: 13px; }
+.ng-badge {
+	font-size: 11px;
+	padding: 2px 9px;
+	border-radius: 999px;
+	background: #eef2f6;
+	color: var(--sim-muted);
+	white-space: nowrap;
+}
+.ng-badge.live { background: #e4f5ec; color: var(--sim-brand-dark); }
+.ng-badge.warn { background: #fdf1dc; color: #8a6216; }
+.ng-docs { display: flex; flex-wrap: wrap; gap: 6px; }
+.ng-doc {
+	font-size: 11px;
+	border: 1px solid var(--sim-line);
+	border-radius: 6px;
+	padding: 3px 7px;
+	color: var(--sim-ink);
+	text-decoration: none;
+	background: #fbfcfd;
+}
+.ng-doc:hover { border-color: var(--sim-brand); text-decoration: none; }
+.ng-doc span { color: var(--sim-muted); }
+.ng-delivery { max-height: 220px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+.ng-delivery .ng-bubble { font-size: 12px; background: #f5f8fa; box-shadow: none; border: 1px solid var(--sim-line); }
+.ng-meta { font-size: 11px; color: var(--sim-muted); }
+</style>
+<div class="ng-sim-banner">
+	<strong>Demo simulator.</strong> Messages are not sent to LINE, but every document this
+	creates in ERPNext is real. Signed in as <code>{{ user_name }}</code> ·
+	simulated LINE id <code>{{ line_id }}</code>.
+</div>
+
+<div class="ng-sim">
+	<div class="ng-phone">
+		<div class="ng-phone-head">
+			<div class="ng-avatar">NG</div>
+			<div>
+				<h2>NextGen ร้านค้า</h2>
+				<small id="ng-sub">{{ customer_name or customer or "ยังไม่ได้จับคู่ลูกค้า" }}</small>
+			</div>
+		</div>
+		<div class="ng-thread" id="ng-thread">
+			<div class="ng-empty" id="ng-empty">เริ่มบทสนทนาได้เลย</div>
+		</div>
+		<div class="ng-presets">
+			{% for preset in presets %}
+			<button class="ng-chip" type="button" data-preset="{{ preset.text }}">{{ preset.label }}</button>
+			{% endfor %}
+			<button class="ng-chip" type="button" id="ng-reset">ล้างแชต</button>
+		</div>
+		<form class="ng-compose" id="ng-form">
+			<button class="ghost" type="button" id="ng-attach" title="แนบสลิป">📎</button>
+			<input type="file" id="ng-file" accept="image/png,image/jpeg" hidden>
+			<input type="text" id="ng-input" placeholder="พิมพ์ข้อความ…" autocomplete="off">
+			<button type="submit" id="ng-send">ส่ง</button>
+		</form>
+	</div>
+
+	<div class="ng-side">
+		<div class="ng-card">
+			<div class="ng-card-head">
+				<h3>ERPNext</h3>
+				<span class="ng-meta" id="ng-status-meta">กำลังโหลด…</span>
+			</div>
+			<div class="ng-card-body" id="ng-status">
+				<div class="ng-meta">ยังไม่มีออเดอร์สำหรับผู้ใช้นี้</div>
+			</div>
+		</div>
+		<div class="ng-card">
+			<div class="ng-card-head">
+				<h3>ทีมจัดส่ง</h3>
+				<span class="ng-meta">{{ delivery_line_id }}</span>
+			</div>
+			<div class="ng-card-body">
+				<div class="ng-delivery" id="ng-delivery">
+					<div class="ng-meta">ยังไม่มีงานจัดส่ง</div>
+				</div>
+			</div>
+		</div>
+	</div>
+</div>
+
+<script>
+(function () {
+	const LINE_ID = {{ line_id | tojson }};
+	const DELIVERY_ID = {{ delivery_line_id | tojson }};
+	const thread = document.getElementById("ng-thread");
+	const empty = document.getElementById("ng-empty");
+	const deliveryPane = document.getElementById("ng-delivery");
+	const statusPane = document.getElementById("ng-status");
+	const statusMeta = document.getElementById("ng-status-meta");
+	const form = document.getElementById("ng-form");
+	const input = document.getElementById("ng-input");
+	const sendBtn = document.getElementById("ng-send");
+	const fileInput = document.getElementById("ng-file");
+	const seen = new Set();
+	const seenDelivery = new Set();
+	let busy = false;
+
+	function call(method, args) {
+		return new Promise(function (resolve, reject) {
+			frappe.call({
+				method: "nextgen_erp.line_simulator." + method,
+				args: args || {},
+				callback: function (r) { resolve(r.message); },
+				error: function (r) { reject(r); }
+			});
+		});
+	}
+
+	function stamp(value) {
+		if (!value) return "";
+		const d = new Date(value.replace(" ", "T"));
+		if (isNaN(d)) return "";
+		return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+	}
+
+	// Server text is inserted as textContent; only URLs become links, so nothing
+	// arriving from the pipeline can inject markup into the page.
+	function withLinks(node, text) {
+		const pattern = /(https?:\/\/[^\s]+)/g;
+		let last = 0;
+		let match;
+		while ((match = pattern.exec(text)) !== null) {
+			if (match.index > last) {
+				node.appendChild(document.createTextNode(text.slice(last, match.index)));
+			}
+			const a = document.createElement("a");
+			a.href = match[0];
+			a.target = "_blank";
+			a.rel = "noopener";
+			a.textContent = match[0];
+			node.appendChild(a);
+			last = match.index + match[0].length;
+		}
+		node.appendChild(document.createTextNode(text.slice(last)));
+	}
+
+	function bubble(msg) {
+		const wrap = document.createElement("div");
+		wrap.className = "ng-msg " + (msg.direction === "Inbound" ? "out" : "in");
+		const body = document.createElement("div");
+		body.className = "ng-bubble";
+		withLinks(body, msg.text || "");
+		if (msg.image_url) {
+			const img = document.createElement("img");
+			img.src = msg.image_url;
+			img.alt = "แนบรูป";
+			img.loading = "lazy";
+			body.appendChild(img);
+		} else if (msg.message_type === "Image" && msg.content_file) {
+			const img = document.createElement("img");
+			img.src = msg.content_file;
+			img.alt = "สลิป";
+			img.loading = "lazy";
+			body.appendChild(img);
+		}
+		const time = document.createElement("div");
+		time.className = "ng-stamp";
+		time.textContent = stamp(msg.creation);
+		wrap.appendChild(body);
+		wrap.appendChild(time);
+		return wrap;
+	}
+
+	function systemNote(text) {
+		const note = document.createElement("div");
+		note.className = "ng-system";
+		note.textContent = text;
+		thread.appendChild(note);
+		thread.scrollTop = thread.scrollHeight;
+	}
+
+	function renderThread(messages) {
+		let added = false;
+		messages.forEach(function (msg) {
+			if (seen.has(msg.name)) return;
+			seen.add(msg.name);
+			thread.appendChild(bubble(msg));
+			added = true;
+		});
+		if (added) {
+			if (empty) empty.remove();
+			thread.scrollTop = thread.scrollHeight;
+		}
+	}
+
+	function renderDelivery(messages) {
+		messages.forEach(function (msg) {
+			if (seenDelivery.has(msg.name)) return;
+			if (!seenDelivery.size) deliveryPane.innerHTML = "";
+			seenDelivery.add(msg.name);
+			const body = document.createElement("div");
+			body.className = "ng-bubble";
+			withLinks(body, msg.text || "");
+			deliveryPane.appendChild(body);
+		});
+		if (seenDelivery.size) deliveryPane.scrollTop = deliveryPane.scrollHeight;
+	}
+
+	function docLink(label, doctype, name) {
+		if (!name) return null;
+		const a = document.createElement("a");
+		a.className = "ng-doc";
+		a.href = "/app/" + doctype + "/" + encodeURIComponent(name);
+		a.target = "_blank";
+		a.rel = "noopener";
+		const tag = document.createElement("span");
+		tag.textContent = label + " ";
+		a.appendChild(tag);
+		a.appendChild(document.createTextNode(name));
+		return a;
+	}
+
+	function renderStatus(data) {
+		statusMeta.textContent = data.customer_name || data.customer || "ยังไม่ได้จับคู่ลูกค้า";
+		const orders = data.orders || [];
+		statusPane.innerHTML = "";
+		if (!orders.length) {
+			const none = document.createElement("div");
+			none.className = "ng-meta";
+			none.textContent = "ยังไม่มีออเดอร์สำหรับผู้ใช้นี้";
+			statusPane.appendChild(none);
+			return;
+		}
+		orders.forEach(function (order) {
+			const row = document.createElement("div");
+			row.className = "ng-order";
+			const top = document.createElement("div");
+			top.className = "ng-order-top";
+			const title = document.createElement("strong");
+			title.textContent = order.name;
+			const badge = document.createElement("span");
+			badge.className = "ng-badge" + (
+				order.status === "Needs Review" || order.status === "Payment Review" ? " warn" : " live"
+			);
+			badge.textContent = order.status;
+			top.appendChild(title);
+			top.appendChild(badge);
+			row.appendChild(top);
+
+			if (order.total) {
+				const total = document.createElement("div");
+				total.className = "ng-meta";
+				total.textContent = Number(order.total).toLocaleString(undefined, {
+					minimumFractionDigits: 2, maximumFractionDigits: 2
+				}) + " บาท";
+				row.appendChild(total);
+			}
+
+			const docs = document.createElement("div");
+			docs.className = "ng-docs";
+			[
+				["SO", "sales-order", order.sales_order],
+				["INV", "sales-invoice", order.sales_invoice],
+				["DN", "delivery-note", order.delivery_note],
+				["PE", "payment-entry", order.payment_entry],
+				["Intake", "ai-order-intake", order.name]
+			].forEach(function (entry) {
+				const link = docLink(entry[0], entry[1], entry[2]);
+				if (link) docs.appendChild(link);
+			});
+			row.appendChild(docs);
+			statusPane.appendChild(row);
+		});
+	}
+
+	function refresh() {
+		call("poll", { recipient: LINE_ID })
+			.then(function (data) { renderThread((data && data.messages) || []); })
+			.catch(function () {});
+		call("poll", { recipient: DELIVERY_ID })
+			.then(function (data) { renderDelivery((data && data.messages) || []); })
+			.catch(function () {});
+	}
+
+	function refreshStatus() {
+		call("status")
+			.then(function (data) { if (data) renderStatus(data); })
+			.catch(function () {});
+	}
+
+	function lock(state) {
+		busy = state;
+		sendBtn.disabled = state;
+		document.querySelectorAll(".ng-chip").forEach(function (chip) { chip.disabled = state; });
+	}
+
+	function report(result) {
+		if (result && result.delivered === false && result.error) systemNote(result.error);
+		refresh();
+		setTimeout(refresh, 1200);
+		setTimeout(refreshStatus, 1500);
+	}
+
+	function sendText(text) {
+		if (!text || busy) return;
+		lock(true);
+		call("send", { text: text })
+			.then(report)
+			.catch(function () { systemNote("ส่งข้อความไม่สำเร็จ กรุณาลองใหม่"); })
+			.then(function () { lock(false); refresh(); });
+	}
+
+	form.addEventListener("submit", function (event) {
+		event.preventDefault();
+		const text = input.value.trim();
+		if (!text) return;
+		input.value = "";
+		sendText(text);
+	});
+
+	document.querySelectorAll("[data-preset]").forEach(function (chip) {
+		chip.addEventListener("click", function () { sendText(chip.dataset.preset); });
+	});
+
+	document.getElementById("ng-attach").addEventListener("click", function () {
+		fileInput.click();
+	});
+
+	fileInput.addEventListener("change", function () {
+		const file = fileInput.files && fileInput.files[0];
+		if (!file) return;
+		const reader = new FileReader();
+		reader.onload = function () {
+			const base64 = String(reader.result).split(",")[1] || "";
+			lock(true);
+			call("send_image", { filename: file.name, content_base64: base64 })
+				.then(report)
+				.catch(function () { systemNote("แนบสลิปไม่สำเร็จ กรุณาลองใหม่"); })
+				.then(function () { lock(false); refresh(); });
+		};
+		reader.readAsDataURL(file);
+		fileInput.value = "";
+	});
+
+	document.getElementById("ng-reset").addEventListener("click", function () {
+		if (busy) return;
+		lock(true);
+		call("reset")
+			.then(function () {
+				seen.clear();
+				thread.innerHTML = "";
+			})
+			.catch(function () {})
+			.then(function () { lock(false); refresh(); });
+	});
+
+	refresh();
+	refreshStatus();
+	setInterval(refresh, 1500);
+	setInterval(refreshStatus, 3000);
+})();
+</script>
+{% endblock %}

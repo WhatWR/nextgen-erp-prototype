@@ -11,11 +11,11 @@
 	</section>
 
 	<div class="ng-toolbar">
-		<input id="ng-search" class="ng-search" type="search" placeholder="ค้นหาชื่อหรือรหัสสินค้า" value="{{ initial_query }}">
-		<div class="ng-groups">
-			<button class="ng-chip active" type="button" data-group="">ทั้งหมด</button>
+		<input id="ng-search" class="ng-search" type="search" aria-label="ค้นหาสินค้า" placeholder="ค้นหาชื่อหรือรหัสสินค้า" value="{{ initial_query }}">
+		<div class="ng-groups" role="toolbar" aria-label="กรองตามกลุ่มสินค้า">
+			<button class="ng-chip active" type="button" data-group="" aria-pressed="true">ทั้งหมด</button>
 			{% for group in groups %}
-			<button class="ng-chip" type="button" data-group="{{ group }}">{{ group }}</button>
+			<button class="ng-chip" type="button" data-group="{{ group }}" aria-pressed="false">{{ group }}</button>
 			{% endfor %}
 		</div>
 	</div>
@@ -26,7 +26,7 @@
 		<article class="ng-card" data-search="{{ product.item_code }} {{ product.item_name }}" data-group="{{ product.item_group }}">
 			<div class="ng-image">
 				{% if product.image %}
-				<img src="{{ product.image }}" alt="{{ product.item_name }}" loading="lazy">
+				<img src="{{ product.image }}" alt="{{ product.item_name }}" loading="lazy" decoding="async">
 				{% else %}
 				<span>{{ product.item_name[:1] }}</span>
 				{% endif %}
@@ -57,7 +57,7 @@
 	<div class="ng-empty">ยังไม่มีสินค้าที่มีราคาขายและเปิดเผยบนเว็บไซต์</div>
 	{% endif %}
 </div>
-<div id="ng-toast" class="ng-toast">คัดลอกแล้ว กรุณากลับไปวางข้อความใน LINE</div>
+<div id="ng-toast" class="ng-toast" role="status" aria-live="polite">คัดลอกแล้ว กรุณากลับไปวางข้อความใน LINE</div>
 
 <script>
 (() => {
@@ -79,8 +79,12 @@
 	search?.addEventListener("input", apply);
 	document.querySelectorAll(".ng-chip").forEach((button) => {
 		button.addEventListener("click", () => {
-			document.querySelectorAll(".ng-chip").forEach((chip) => chip.classList.remove("active"));
+			document.querySelectorAll(".ng-chip").forEach((chip) => {
+				chip.classList.remove("active");
+				chip.setAttribute("aria-pressed", "false");
+			});
 			button.classList.add("active");
+			button.setAttribute("aria-pressed", "true");
 			group = button.dataset.group || "";
 			apply();
 		});
@@ -99,7 +103,12 @@
 				input.remove();
 			}
 			const toast = document.getElementById("ng-toast");
+			// Re-set the text so screen readers announce every copy, not just the first.
+			toast.textContent = "";
 			toast.style.display = "block";
+			requestAnimationFrame(() => {
+				toast.textContent = "คัดลอกแล้ว กรุณากลับไปวางข้อความใน LINE";
+			});
 			setTimeout(() => toast.style.display = "none", 2600);
 		});
 	});

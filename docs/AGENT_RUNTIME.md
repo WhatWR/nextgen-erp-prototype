@@ -31,7 +31,9 @@ through the whitelisted methods in `nextgen_erp/agent_gateway/api.py`.
 | `NextGen Action Proposal` | Immutable original proposal, live preview, warnings, policy snapshot, resource versions, snapshot hash, expiry, result |
 | `NextGen Approval Decision` | Reviewer, decision, reason, and the exact snapshot hash they reviewed |
 | `NextGen Automation Policy` | One per company: enablement, mode, warehouses, item groups, allowlists, limits, service user, and the DocTypes the assistant may propose |
-| `NextGen Agent Workflow` | Phase 3: a validated graph of agent nodes, versioned and company-scoped |
+| `NextGen Agent Workflow` | A validated graph of typed nodes, versioned and company-scoped, plus its triggers |
+| `NextGen Workflow Node Result` | One row per deterministic node per run: status, sanitized output envelope, artifact |
+| `NextGen Agent Connection` | An outbound HTTP target a `source.api` node may use: base URL, path allowlist, encrypted credential |
 
 ## Boundary contract
 
@@ -44,11 +46,13 @@ staying independently deployable.
 ```text
 Frappe  -> runtime   dispatch_run · resume_run · cancel_run · get_runtime_health
 runtime -> Frappe    claim_run · record_step · execute_tool · create_proposal
-                     create_node_run · complete_run
+                     create_node_run · execute_node · get_workflow_state · complete_run
 human   -> Frappe    start_agent_run · get_run · get_proposal · revalidate_proposal
                      approve_proposal · reject_proposal · execute_proposal
                      list_workflows · get_workflow · save_workflow · delete_workflow
                      start_workflow_run · get_workflow_run · get_workflow_history
+                     reveal_webhook_token
+external -> Frappe   workflow_webhook (token-authenticated, runs as a named user)
 ```
 
 The runtime can create a proposal. It cannot approve one, and no gateway method
@@ -73,6 +77,50 @@ which rejects the service identity.
    both sides; the complete payload's hash is kept so audit stays verifiable.
 8. Failures are fail-closed. There is no automatic fallback to embedded
    orchestration; runtime failure leaves an observable Queued or Failed run.
+9. A workflow cannot approve its own work. A node that produces a proposal parks
+   the parent run at `Waiting Approval` and later nodes do not run. Executing
+   the proposal resumes the graph; rejecting it cancels the run.
+10. The runtime never executes a source, sink or API call itself. It names a
+   node; Frappe reads that node from the stored graph, rebuilds its inputs from
+   the outputs it already persisted, and runs it under the requester's own
+   permissions. The runtime has no file, database or outbound-network access.
+
+## Workflow node kinds
+
+A workflow is a DAG of typed nodes. An **agent node** runs a registered agent as
+its own child run — same allowlist, proposals, approval and audit as a
+single-agent run. Every other kind is deterministic and executes inside Frappe.
+
+| Kind | Does | Bounded by |
+|---|---|---|
+| `agent` | Runs one registered agent | Company policy and the code tool allowlist |
+| `source.query` | Reads ERP rows | `frappe.get_list` as the requester; denylisted DocTypes refused; scoped to the run's company |
+| `source.excel` | Parses an attached `.xlsx`/`.csv`/`.tsv` | The requester's read permission on the File; 500 rows |
+| `source.api` | Calls an HTTP endpoint | A `NextGen Agent Connection`: its base URL, its path allowlist, its response size cap. The graph holds no URL or credential |
+| `sink.report` | Writes an HTML/CSV/JSON file | Attached privately to the run |
+
+Nodes pass an **envelope** — text, rows, documents, artifacts — and a node reads
+the envelopes of the nodes actually connected to it, so a graph that fans out and
+merges behaves as drawn. Envelopes are redacted and row-bounded before storage,
+and a prompt gets a sample rather than the whole result set.
+
+A graph saved before typed nodes existed carries no `kind` and is read as a graph
+of agent nodes, so it keeps running unchanged.
+
+## Triggers
+
+Manual execution from the designer always works and needs no configuration.
+Beyond that a workflow may carry `NextGen Agent Workflow Trigger` rows:
+
+| Trigger | Fires | Notes |
+|---|---|---|
+| Schedule | Cron, evaluated every five minutes against the trigger's own last run | A missed tick starts the workflow late rather than not at all |
+| Webhook | `POST /api/method/nextgen_erp.agent_gateway.api.workflow_webhook` | Token in `X-NextGen-Workflow-Token`; compared with `hmac.compare_digest` |
+| Document Event | `after_insert` / `on_update` / `on_submit` / `on_cancel` | Optional condition is a JSON object the server *compares*, never evaluates |
+
+Every trigger names a `run_as` user: an unattended run still acts as somebody,
+under their own permissions, and never as Administrator. A document a workflow
+proposed does not retrigger that workflow.
 
 ## Configuration
 
@@ -133,6 +181,10 @@ cd services/agent-runtime && PYTHONPATH=src:tests python -m unittest discover -s
 
 ```bash
 bench --site <site> run-tests --app nextgen_erp --module nextgen_erp.tests.test_agent_gateway
+```
+
+```bash
+bench --site <site> run-tests --app nextgen_erp --module nextgen_erp.tests.test_agent_workflows
 ```
 
 `nextgen_erp/tests/test_agent_contracts.py` needs no site and can be run with

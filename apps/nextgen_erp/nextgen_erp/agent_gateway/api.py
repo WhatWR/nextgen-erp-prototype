@@ -473,6 +473,7 @@ def save_workflow(
 	description: str | None = None,
 	graph=None,
 	enabled: int = 0,
+	triggers=None,
 ):
 	return workflows.save_workflow(
 		name=name,
@@ -481,6 +482,7 @@ def save_workflow(
 		description=description,
 		graph=_parse(graph, None),
 		enabled=cint(enabled),
+		triggers=_parse(triggers, None),
 	)
 
 
@@ -492,6 +494,12 @@ def delete_workflow(name: str):
 @frappe.whitelist()
 def start_workflow_run(workflow: str, message: str | None = None):
 	return workflows.start_workflow_run(workflow, message)
+
+
+@frappe.whitelist()
+def reveal_webhook_token(workflow: str):
+	"""Read a workflow's webhook token. System Manager only, and audited by Frappe."""
+	return workflows.reveal_webhook_token(workflow)
 
 
 @frappe.whitelist()
@@ -536,6 +544,69 @@ def create_node_run(
 		node_prompt=payload.get("node_prompt"),
 	)
 	return _validate("run_context", context)
+
+
+@frappe.whitelist()
+def execute_node(
+	contract_version: str = "",
+	parent_run_id: str = "",
+	node_id: str = "",
+	idempotency_key: str = "",
+):
+	"""Runtime-only: execute one deterministic workflow node inside Frappe.
+
+	The runtime names the node and nothing else. Its configuration is read from
+	the stored graph and its inputs from the outputs Frappe already recorded, so
+	no URL, query, file or upstream payload is taken from the caller.
+	"""
+	payload = _validate(
+		"execute_node_request",
+		{
+			"contract_version": contract_version,
+			"parent_run_id": parent_run_id,
+			"node_id": node_id,
+			"idempotency_key": idempotency_key,
+		},
+	)
+	result = workflows.execute_node(
+		parent_run_id=payload["parent_run_id"],
+		node_id=payload["node_id"],
+		idempotency_key=payload["idempotency_key"],
+	)
+	return _validate("node_result", result)
+
+
+@frappe.whitelist()
+def get_workflow_state(contract_version: str = "", parent_run_id: str = ""):
+	"""Runtime-only: what the graph has already achieved.
+
+	A workflow that parked for an approval resumes in a different process, so
+	the outputs of earlier nodes are read back from here rather than remembered.
+	"""
+	payload = _validate(
+		"workflow_state_request",
+		{"contract_version": contract_version, "parent_run_id": parent_run_id},
+	)
+	return _validate("workflow_state", workflows.workflow_state(payload["parent_run_id"]))
+
+
+@frappe.whitelist(allow_guest=True, methods=["POST"])
+def workflow_webhook(workflow: str = "", token: str = ""):
+	"""Start a workflow from an external caller holding its trigger token.
+
+	The token authenticates the *trigger*, not a person: the run still executes
+	as the human the trigger names, under their own ERP permissions.
+	"""
+	body = {}
+	if frappe.request:
+		try:
+			body = json.loads(frappe.request.get_data(as_text=True) or "{}")
+		except (TypeError, ValueError):
+			body = {}
+	if not isinstance(body, dict):
+		body = {"payload": body}
+	token = token or (frappe.get_request_header("X-NextGen-Workflow-Token") or "")
+	return workflows.start_from_webhook(workflow, token, body)
 
 
 @frappe.whitelist()

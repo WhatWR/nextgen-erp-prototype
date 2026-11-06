@@ -1,0 +1,34 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["run", "node_id", "node_kind", "status", "column_break_identity", "idempotency_key", "correlation_id", "child_run", "started_at", "ended_at", "section_output", "output_json", "row_count", "artifact", "error"],
+ "fields": [
+  {"description": "The parent run that orchestrates the workflow. Node results are scoped to one execution of the graph.", "fieldname": "run", "fieldtype": "Link", "in_list_view": 1, "in_standard_filter": 1, "label": "Run", "options": "NextGen Agent Run", "reqd": 1},
+  {"fieldname": "node_id", "fieldtype": "Data", "in_list_view": 1, "label": "Node", "reqd": 1},
+  {"fieldname": "node_kind", "fieldtype": "Data", "in_list_view": 1, "label": "Node Kind", "reqd": 1},
+  {"description": "A node is Completed only once everything it produced is settled, including any proposal a human had to approve.", "fieldname": "status", "fieldtype": "Select", "in_list_view": 1, "in_standard_filter": 1, "label": "Status", "options": "Pending\nRunning\nWaiting Approval\nCompleted\nFailed\nCancelled", "reqd": 1},
+  {"fieldname": "column_break_identity", "fieldtype": "Column Break"},
+  {"description": "Derived from the run and the node, so re-executing a resumed workflow replays this result instead of repeating the work.", "fieldname": "idempotency_key", "fieldtype": "Data", "label": "Idempotency Key", "reqd": 1, "unique": 1},
+  {"fieldname": "correlation_id", "fieldtype": "Data", "label": "Correlation ID", "search_index": 1},
+  {"description": "Set for agent nodes, which execute as their own child run.", "fieldname": "child_run", "fieldtype": "Link", "label": "Child Run", "options": "NextGen Agent Run"},
+  {"fieldname": "started_at", "fieldtype": "Datetime", "label": "Started At"},
+  {"fieldname": "ended_at", "fieldtype": "Datetime", "label": "Ended At"},
+  {"fieldname": "section_output", "fieldtype": "Section Break", "label": "Output"},
+  {"description": "The sanitized envelope handed to downstream nodes. Redacted and bounded, exactly like an Agent Step payload.", "fieldname": "output_json", "fieldtype": "JSON", "label": "Output"},
+  {"fieldname": "row_count", "fieldtype": "Int", "label": "Rows"},
+  {"fieldname": "artifact", "fieldtype": "Link", "label": "Artifact", "options": "File"},
+  {"fieldname": "error", "fieldtype": "Small Text", "label": "Error"}
+ ],
+ "links": [],
+ "module": "NextGen ERP",
+ "name": "NextGen Workflow Node Result",
+ "permissions": [
+  {"create": 1, "delete": 1, "read": 1, "report": 1, "role": "System Manager", "write": 1},
+  {"create": 1, "read": 1, "role": "NextGen Agent Runtime", "write": 1}
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

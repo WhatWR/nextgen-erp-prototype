@@ -118,13 +118,13 @@
 .ng-message { display: flex; margin-bottom: 14px; flex-direction: column; align-items: flex-start; }
 .ng-message.ng-user { align-items: flex-end; }
 .ng-bubble { max-width: 88%; padding: 10px 12px; border-radius: 14px; background: var(--fg-color, #fff); color: var(--text-color, #172033); box-shadow: 0 1px 3px rgb(15 23 42 / 8%); line-height: 1.5; }
-.ng-user .ng-bubble { background: #2563eb; color: #fff; border-bottom-right-radius: 4px; }
+.ng-user .ng-bubble { background: var(--ng-agent-color, #2563eb); color: #fff; border-bottom-right-radius: 4px; }
 .ng-error .ng-bubble { border: 1px solid #ef4444; }
 .ng-thinking::after { content: "…"; animation: ng-pulse 1s infinite; }
 @keyframes ng-pulse { 50% { opacity: .35; } }
 
 .ng-suggestions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.ng-suggestions button, .ng-retry, .ng-doc-link { border: 1px solid #2563eb; border-radius: 999px; padding: 5px 9px; background: transparent; color: #2563eb; font-size: 12px; cursor: pointer; }
+.ng-suggestions button, .ng-retry, .ng-doc-link { border: 1px solid var(--ng-agent-color, #2563eb); border-radius: 999px; padding: 5px 9px; background: transparent; color: var(--ng-agent-color, #2563eb); font-size: 12px; cursor: pointer; }
 
 .ng-action-card { width: 94%; margin-top: 8px; padding: 12px; border: 1px solid #c7d2fe; border-radius: 12px; background: var(--fg-color, #fff); }
 .ng-action-title { display: flex; justify-content: space-between; color: #3730a3; }
@@ -136,7 +136,7 @@
 .ng-action-total { margin-top: 7px; text-align: right; font-weight: 600; }
 .ng-action-warnings { margin: 8px 0; padding-left: 20px; color: #b45309; font-size: 12px; }
 .ng-action-buttons { display: flex; gap: 8px; margin-top: 10px; }
-.ng-action-buttons button { flex: 1; border: 0; border-radius: 8px; padding: 8px; background: #2563eb; color: #fff; cursor: pointer; }
+.ng-action-buttons button { flex: 1; border: 0; border-radius: 8px; padding: 8px; background: var(--ng-agent-color, #2563eb); color: #fff; cursor: pointer; }
 .ng-action-buttons button.secondary { border: 1px solid var(--border-color, #d1d5db); background: transparent; color: var(--text-color, #334155); }
 .ng-action-result { margin-top: 6px; color: #15803d; font-size: 12px; }
 
@@ -168,6 +168,7 @@
 	border: 1px solid var(--ng-agent-color, #0e9f6e);
 	border-radius: 8px;
 	padding: 6px 8px;
+	background: rgba(14, 159, 110, 0.08); /* fallback when color-mix is unsupported */
 	background: color-mix(in srgb, var(--ng-agent-color, #0e9f6e) 8%, transparent);
 	color: var(--ng-agent-color, #0e9f6e);
 	font-size: 11px;
@@ -199,7 +200,7 @@
 .ng-chat-composer { display: flex; gap: 8px; padding: 12px; border-top: 1px solid var(--border-color, #e5e7eb); }
 .ng-chat-composer textarea { flex: 1; resize: none; border: 1px solid var(--border-color, #cbd5e1); border-radius: 10px; padding: 9px; background: var(--control-bg, #fff); color: var(--text-color, #172033); }
 .ng-chat-composer > div { display: flex; flex-direction: column; gap: 4px; }
-.ng-chat-composer button { border: 0; border-radius: 8px; padding: 8px 11px; background: #2563eb; color: #fff; cursor: pointer; }
+.ng-chat-composer button { border: 0; border-radius: 8px; padding: 8px 11px; background: var(--ng-agent-color, #2563eb); color: #fff; cursor: pointer; }
 .ng-chat-composer button:disabled { opacity: .5; }
 #nextgen-chat-stop { background: #64748b; }
 
@@ -229,3 +230,34 @@
 .ng-comparison-card td { padding: 6px; border-bottom: 1px solid var(--border-color, #eef2f7); vertical-align: top; }
 .ng-comparison-card td small { display: block; color: var(--text-muted, #94a3b8); font-size: 10px; }
 .ng-vendor-recommended td { background: #f0fdf4; }
+
+/* Accessibility: visible keyboard focus across the chat widget */
+#nextgen-chat-launcher:focus-visible,
+#nextgen-chat-panel button:focus-visible,
+#nextgen-chat-panel textarea:focus-visible {
+	outline: 2px solid var(--ng-agent-color, #2563eb);
+	outline-offset: 2px;
+}
+
+/* Visually-hidden live region for completed assistant replies */
+.ng-sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip: rect(0 0 0 0);
+	white-space: nowrap;
+	border: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	#nextgen-chat-launcher,
+	#nextgen-chat-panel {
+		transition: none;
+	}
+	.ng-thinking::after {
+		animation: none;
+	}
+}

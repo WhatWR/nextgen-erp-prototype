@@ -9,17 +9,43 @@ const props = defineProps({
 	selected: { type: Boolean, default: false },
 });
 
-const initial = computed(() => (props.label || props.id || "?").slice(0, 1).toUpperCase());
-const agent = computed(() => props.data.agent || "unassigned");
+// Icon and colour come from the node's kind, so the shape of a workflow is
+// readable at a glance: where data enters, where a model thinks, where it lands.
+const KINDS = {
+	"agent": { icon: "◆", tone: "agent" },
+	"source.query": { icon: "▤", tone: "source" },
+	"source.excel": { icon: "▦", tone: "source" },
+	"source.api": { icon: "⇄", tone: "source" },
+	"sink.report": { icon: "▣", tone: "sink" },
+};
+
+const kind = computed(() => props.data.kind || "agent");
+const style = computed(() => KINDS[kind.value] || KINDS.agent);
+
+const subtitle = computed(() => {
+	const data = props.data;
+	switch (kind.value) {
+		case "source.query":
+			return data.doctype || __("no DocType");
+		case "source.excel":
+			return data.file || __("no file");
+		case "source.api":
+			return [data.connection, data.path].filter(Boolean).join(" ") || __("no connection");
+		case "sink.report":
+			return (data.format || "html").toUpperCase();
+		default:
+			return data.agent || __("unassigned");
+	}
+});
 </script>
 
 <template>
-	<div class="ngw-node" :class="{ selected: props.selected }">
+	<div class="ngw-node" :class="[style.tone, { selected: props.selected }]">
 		<Handle type="target" :position="Position.Left" />
-		<div class="ngw-node-badge">{{ initial }}</div>
+		<div class="ngw-node-badge">{{ style.icon }}</div>
 		<div class="ngw-node-text">
 			<div class="ngw-node-title">{{ props.label || props.id }}</div>
-			<div class="ngw-node-agent">{{ agent }}</div>
+			<div class="ngw-node-agent">{{ subtitle }}</div>
 		</div>
 		<Handle type="source" :position="Position.Right" />
 	</div>
@@ -53,6 +79,12 @@ const agent = computed(() => props.data.agent || "unassigned");
 	background: var(--primary);
 	flex-shrink: 0;
 }
+.ngw-node.source .ngw-node-badge {
+	background: var(--blue-500, #2490ef);
+}
+.ngw-node.sink .ngw-node-badge {
+	background: var(--green-600, #0e9f6e);
+}
 .ngw-node-title {
 	font-weight: 600;
 	font-size: var(--text-sm);
@@ -60,5 +92,9 @@ const agent = computed(() => props.data.agent || "unassigned");
 .ngw-node-agent {
 	font-size: var(--text-xs);
 	color: var(--text-muted);
+	max-width: 180px;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 </style>

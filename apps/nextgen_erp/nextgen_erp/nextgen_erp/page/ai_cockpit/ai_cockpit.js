@@ -17,6 +17,7 @@ class NextGenAICommandCenter {
 		this.wrapper = wrapper;
 		this.page = wrapper.page;
 		this.days = 30;
+		this.charts = [];
 		this.render_shell();
 		this.setup_actions();
 	}
@@ -28,26 +29,31 @@ class NextGenAICommandCenter {
 					<div>
 						<div class="ng-eyebrow">NEXTGEN INTELLIGENCE</div>
 						<h2>AI Cockpit</h2>
-						<p>ภาพรวมงานขาย จัดซื้อ และความเสี่ยงสต๊อก จากข้อมูล ERP แบบเรียลไทม์</p>
+						<p>${__("ภาพรวมงานขาย จัดซื้อ และความเสี่ยงสต๊อก จากข้อมูล ERP แบบเรียลไทม์")}</p>
 					</div>
 					<div class="ng-hero-agents">
-						<button data-route="ai-sales-copilot" class="ng-agent-pill ng-agent-sales">${frappe.utils.icon("bot-message-square", "md")} Sales Copilot</button>
-						<button data-route="ai-procurement-copilot" class="ng-agent-pill ng-agent-buying">${frappe.utils.icon("shopping-cart", "md")} Procurement Copilot</button>
+						<button type="button" data-route="ai-sales-copilot" class="ng-agent-pill ng-agent-sales">${frappe.utils.icon("bot-message-square", "md")} Sales Copilot</button>
+						<button type="button" data-route="ai-procurement-copilot" class="ng-agent-pill ng-agent-buying">${frappe.utils.icon("shopping-cart", "md")} Procurement Copilot</button>
 					</div>
 				</section>
 				<div class="ng-command-meta">
-					<label>ช่วงเวลา <select class="ng-period-filter"><option value="7">7 วัน</option><option value="30" selected>30 วัน</option><option value="90">90 วัน</option><option value="365">12 เดือน</option></select></label>
-					<span class="ng-live-status"><span class="ng-live-dot"></span><span class="ng-generated">กำลังโหลดข้อมูล…</span></span>
+					<label>${__("ช่วงเวลา")} <select class="ng-period-filter"><option value="7">${__("7 วัน")}</option><option value="30" selected>${__("30 วัน")}</option><option value="90">${__("90 วัน")}</option><option value="365">${__("12 เดือน")}</option></select></label>
+					<span class="ng-live-status"><span class="ng-live-dot"></span><span class="ng-generated">${__("กำลังโหลดข้อมูล…")}</span></span>
 				</div>
-				<section class="ng-kpi-grid"></section>
-				<section class="ng-chart-grid">
-					<article class="ng-panel ng-panel-wide"><div class="ng-panel-head"><div><span>BUSINESS FLOW</span><h3>Sales vs Procurement</h3></div><small>6 เดือนล่าสุด</small></div><div id="ng-flow-chart" class="ng-chart"></div></article>
-					<article class="ng-panel"><div class="ng-panel-head"><div><span>ORDER INTAKE</span><h3>สถานะงานขาย</h3></div></div><div id="ng-intake-chart" class="ng-chart"></div></article>
-					<article class="ng-panel"><div class="ng-panel-head"><div><span>INVENTORY SIGNAL</span><h3>ความเสี่ยงสต๊อก</h3></div></div><div id="ng-risk-chart" class="ng-chart"></div></article>
-				</section>
-				<section class="ng-bottom-grid">
-					<article class="ng-panel"><div class="ng-panel-head"><div><span>ACTION REQUIRED</span><h3>งานที่ต้องดูแล</h3></div></div><div class="ng-attention-list"></div></article>
-					<article class="ng-panel"><div class="ng-panel-head"><div><span>LIVE ACTIVITY</span><h3>ความเคลื่อนไหวล่าสุด</h3></div></div><div class="ng-activity-list"></div></article>
+			<section class="ng-kpi-grid">
+				<div class="ng-skeleton" aria-hidden="true"></div>
+				<div class="ng-skeleton" aria-hidden="true"></div>
+				<div class="ng-skeleton" aria-hidden="true"></div>
+				<div class="ng-skeleton" aria-hidden="true"></div>
+			</section>
+			<section class="ng-chart-grid">
+				<article class="ng-panel ng-panel-wide"><div class="ng-panel-head"><div><span>BUSINESS FLOW</span><h3>Sales vs Procurement</h3></div><small>${__("6 เดือนล่าสุด")}</small></div><div id="ng-flow-chart" class="ng-chart"><div class="ng-skeleton ng-skeleton-chart" aria-hidden="true"></div></div></article>
+				<article class="ng-panel"><div class="ng-panel-head"><div><span>ORDER INTAKE</span><h3>${__("สถานะงานขาย")}</h3></div></div><div id="ng-intake-chart" class="ng-chart"><div class="ng-skeleton ng-skeleton-chart" aria-hidden="true"></div></div></article>
+				<article class="ng-panel"><div class="ng-panel-head"><div><span>INVENTORY SIGNAL</span><h3>${__("ความเสี่ยงสต๊อก")}</h3></div></div><div id="ng-risk-chart" class="ng-chart"><div class="ng-skeleton ng-skeleton-chart" aria-hidden="true"></div></div></article>
+			</section>
+			<section class="ng-bottom-grid">
+				<article class="ng-panel"><div class="ng-panel-head"><div><span>ACTION REQUIRED</span><h3>${__("งานที่ต้องดูแล")}</h3></div></div><div class="ng-attention-list"></div></article>
+				<article class="ng-panel"><div class="ng-panel-head"><div><span>LIVE ACTIVITY</span><h3>${__("ความเคลื่อนไหวล่าสุด")}</h3></div></div><div class="ng-activity-list"></div></article>
 				</section>
 			</div>`
 		).appendTo($(this.wrapper).find(".layout-main-section").empty());
@@ -60,6 +66,7 @@ class NextGenAICommandCenter {
 		this.$root.on("click", "[data-list]", (event) => {
 			frappe.set_route("List", $(event.currentTarget).data("list"));
 		});
+		this.$root.on("click", '[data-action="retry"]', () => this.refresh());
 	}
 
 	setup_actions() {
@@ -77,11 +84,21 @@ class NextGenAICommandCenter {
 			this.data = data;
 			this.render(data);
 		} catch (error) {
-			this.$root.find(".ng-kpi-grid").html(`<div class="ng-empty">ไม่สามารถโหลด dashboard ได้ กรุณาลองใหม่</div>`);
+			this.render_error();
 			throw error;
 		} finally {
 			this.$root.removeClass("is-loading");
 		}
+	}
+
+	render_error() {
+		this.$root.find(".ng-generated").text(__("โหลดข้อมูลไม่สำเร็จ"));
+		this.$root.find(".ng-kpi-grid").html(`
+			<div class="ng-error-panel" role="alert">
+				<strong>${__("ไม่สามารถโหลด dashboard ได้")}</strong>
+				<small>${__("ตรวจสอบการเชื่อมต่อ แล้วลองอีกครั้ง")}</small>
+				<button type="button" class="ng-retry-btn" data-action="retry">${__("ลองใหม่")}</button>
+			</div>`);
 	}
 
 	format_currency(value) {
@@ -90,65 +107,77 @@ class NextGenAICommandCenter {
 
 	render(data) {
 		const cards = [
-			{ label: "ยอดขายจาก Sales Order", value: this.format_currency(data.kpis.sales_value), detail: `${data.kpis.sales_orders} ออเดอร์`, icon: "trending-up", tone: "blue", list: "Sales Order" },
-			{ label: "มูลค่าจัดซื้อ", value: this.format_currency(data.kpis.purchase_value), detail: `${data.kpis.purchase_orders} ใบสั่งซื้อ`, icon: "shopping-cart", tone: "green", list: "Purchase Order" },
-			{ label: "ต้องดำเนินการ", value: data.kpis.attention.toLocaleString("th-TH"), detail: "รวมทุก Copilot", icon: "circle-alert", tone: "amber", route: "ai-cockpit" },
-			{ label: "Automation Success", value: `${data.kpis.automation_rate}%`, detail: "Order Intake อัตโนมัติ", icon: "sparkles", tone: "violet", route: "ai-sales-copilot" },
+			{ label: __("ยอดขายจาก Sales Order"), value: this.format_currency(data.kpis.sales_value), detail: __("{0} ออเดอร์", [data.kpis.sales_orders]), icon: "trending-up", tone: "blue", list: "Sales Order" },
+			{ label: __("มูลค่าจัดซื้อ"), value: this.format_currency(data.kpis.purchase_value), detail: __("{0} ใบสั่งซื้อ", [data.kpis.purchase_orders]), icon: "shopping-cart", tone: "green", list: "Purchase Order" },
+			{ label: __("ต้องดำเนินการ"), value: data.kpis.attention.toLocaleString("th-TH"), detail: __("รวมทุก Copilot"), icon: "circle-alert", tone: "amber", route: "ai-cockpit" },
+			{ label: __("Automation Success"), value: `${data.kpis.automation_rate}%`, detail: __("Order Intake อัตโนมัติ"), icon: "sparkles", tone: "violet", route: "ai-sales-copilot" },
 		];
 		this.$root.find(".ng-kpi-grid").html(cards.map((card) => `
-			<button class="ng-kpi ng-${card.tone}" ${card.list ? `data-list="${card.list}"` : `data-route="${card.route}"`}>
+			<button type="button" class="ng-kpi ng-${card.tone}" ${card.list ? `data-list="${card.list}"` : `data-route="${card.route}"`}>
 				<span class="ng-kpi-icon">${frappe.utils.icon(card.icon, "lg")}</span>
 				<span class="ng-kpi-copy"><small>${card.label}</small><strong>${card.value}</strong><em>${card.detail}</em></span>
 				<span class="ng-kpi-arrow">${frappe.utils.icon("arrow-up-right", "sm")}</span>
 			</button>`).join(""));
 
-		this.$root.find(".ng-generated").text(`ข้อมูลสด · ${data.company || "ทุกบริษัท"} · ${data.period_days} วันล่าสุด`);
+		this.$root.find(".ng-generated").text(__("ข้อมูลสด · {0} · {1} วันล่าสุด", [data.company || __("ทุกบริษัท"), data.period_days]));
 		this.render_charts(data);
 		this.render_attention(data.attention);
 		this.render_activities(data.activities);
 	}
 
 	render_charts(data) {
+		// Destroy previous chart instances before re-creating; frappe-charts
+		// attaches listeners that otherwise leak on every period switch.
+		this.charts.forEach((chart) => chart?.destroy?.());
+		this.charts = [];
 		["#ng-flow-chart", "#ng-intake-chart", "#ng-risk-chart"].forEach((selector) => this.$root.find(selector).empty());
-		new frappe.Chart("#ng-flow-chart", {
+		const total_sales = (data.trend.sales || []).reduce((sum, value) => sum + value, 0);
+		const total_purchases = (data.trend.purchases || []).reduce((sum, value) => sum + value, 0);
+		this.$root.find("#ng-flow-chart").attr({
+			role: "img",
+			"aria-label": __("กราฟเส้น 6 เดือนล่าสุด ยอดขายรวม {0} จัดซื้อรวม {1}", [this.format_currency(total_sales), this.format_currency(total_purchases)]),
+		});
+		this.charts.push(new frappe.Chart("#ng-flow-chart", {
 			type: "line", height: 250, colors: ["#3b82f6", "#10b981"],
 			data: { labels: data.trend.labels, datasets: [{ name: "Sales", values: data.trend.sales }, { name: "Procurement", values: data.trend.purchases }] },
 			axisOptions: { xAxisMode: "tick", yAxisMode: "tick", xIsSeries: true },
 			lineOptions: { regionFill: 1, hideDots: 0, spline: 1 },
 			tooltipOptions: { formatTooltipY: (value) => this.format_currency(value) },
-		});
-		this.make_donut("#ng-intake-chart", data.intake_status, ["#f59e0b", "#3b82f6", "#8b5cf6", "#10b981", "#cbd5e1"]);
-		this.make_donut("#ng-risk-chart", data.stock_risk, ["#ef4444", "#f59e0b", "#10b981"]);
+		}));
+		this.charts.push(this.make_donut("#ng-intake-chart", data.intake_status, ["#f59e0b", "#3b82f6", "#8b5cf6", "#10b981", "#cbd5e1"], __("สถานะงานขาย")));
+		this.charts.push(this.make_donut("#ng-risk-chart", data.stock_risk, ["#ef4444", "#f59e0b", "#10b981"], __("ความเสี่ยงสต๊อก")));
 	}
 
-	make_donut(selector, values, colors) {
+	make_donut(selector, values, colors, title) {
 		const has_data = values.values.some((value) => value > 0);
 		if (!has_data) {
-			this.$root.find(selector).html(`<div class="ng-empty-chart">ยังไม่มีข้อมูลในช่วงเวลานี้</div>`);
-			return;
+			this.$root.find(selector).html(`<div class="ng-empty-chart">${__("ยังไม่มีข้อมูลในช่วงเวลานี้")}</div>`);
+			return null;
 		}
-		new frappe.Chart(selector, { type: "donut", height: 230, colors, data: { labels: values.labels, datasets: [{ values: values.values }] } });
+		const summary = values.labels.map((label, index) => `${label}: ${values.values[index]}`).join(", ");
+		this.$root.find(selector).attr({ role: "img", "aria-label": `${title} — ${summary}` });
+		return new frappe.Chart(selector, { type: "donut", height: 230, colors, data: { labels: values.labels, datasets: [{ values: values.values }] } });
 	}
 
 	render_attention(attention) {
 		const rows = [
-			{ label: "Sales Order Intake", detail: "รอตรวจสอบหรือรอลูกค้า", value: attention.sales, icon: "bot-message-square", tone: "blue", list: "AI Order Intake" },
-			{ label: "Procurement Recommendations", detail: "คำแนะนำที่ยังไม่จบงาน", value: attention.procurement, icon: "shopping-cart", tone: "green", list: "NextGen Procurement Recommendation" },
-			{ label: "Stockout Risk", detail: "สินค้าเสี่ยงขาดระดับสูง", value: attention.stock, icon: "triangle-alert", tone: "red", list: "NextGen Procurement Forecast" },
+			{ label: "Sales Order Intake", detail: __("รอตรวจสอบหรือรอลูกค้า"), value: attention.sales, icon: "bot-message-square", tone: "blue", list: "AI Order Intake" },
+			{ label: "Procurement Recommendations", detail: __("คำแนะนำที่ยังไม่จบงาน"), value: attention.procurement, icon: "shopping-cart", tone: "green", list: "NextGen Procurement Recommendation" },
+			{ label: "Stockout Risk", detail: __("สินค้าเสี่ยงขาดระดับสูง"), value: attention.stock, icon: "triangle-alert", tone: "red", list: "NextGen Procurement Forecast" },
 		];
 		this.$root.find(".ng-attention-list").html(rows.map((row) => `
-			<button class="ng-attention-row" data-list="${row.list}"><span class="ng-mini-icon ng-${row.tone}">${frappe.utils.icon(row.icon, "md")}</span><span><strong>${row.label}</strong><small>${row.detail}</small></span><b>${row.value}</b>${frappe.utils.icon("chevron-right", "sm")}</button>`).join(""));
+			<button type="button" class="ng-attention-row" data-list="${row.list}"><span class="ng-mini-icon ng-${row.tone}">${frappe.utils.icon(row.icon, "md")}</span><span><strong>${row.label}</strong><small>${row.detail}</small></span><b>${row.value}</b>${frappe.utils.icon("chevron-right", "sm")}</button>`).join(""));
 	}
 
 	render_activities(activities) {
 		const escape = frappe.utils.escape_html;
 		if (!activities.length) {
-			this.$root.find(".ng-activity-list").html(`<div class="ng-empty-chart">ยังไม่มีกิจกรรมล่าสุด</div>`);
+			this.$root.find(".ng-activity-list").html(`<div class="ng-empty-chart">${__("ยังไม่มีกิจกรรมล่าสุด")}</div>`);
 			return;
 		}
 		this.$root.find(".ng-activity-list").html(activities.map((row) => {
 			const doc = JSON.stringify([row.doctype, row.name]).replace(/'/g, "&#39;");
-			return `<button class="ng-activity-row" data-document='${doc}'><span class="ng-activity-dot ng-${row.tone}"></span><span><small>${escape(row.kind)}</small><strong>${escape(row.title)}</strong><em>${escape(row.detail || "")}</em></span><time>${frappe.datetime.prettyDate(row.modified)}</time></button>`;
+			return `<button type="button" class="ng-activity-row" data-document='${doc}'><span class="ng-activity-dot ng-${row.tone}"></span><span><small>${escape(row.kind)}</small><strong>${escape(row.title)}</strong><em>${escape(row.detail || "")}</em></span><time>${frappe.datetime.prettyDate(row.modified)}</time></button>`;
 		}).join(""));
 	}
 }

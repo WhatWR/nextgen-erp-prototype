@@ -2,6 +2,10 @@
 
 > **Document status:** Current LINE payment and order-flow capability. This behavior is a required regression contract in the [canonical acceptance tests](AI_HANDOFF/ACCEPTANCE_TESTS.md).
 
+To rehearse or demonstrate this lifecycle before a LINE Official Account exists,
+use the [LINE simulator page](LINE_SIMULATOR.md) (`/line-sim`) or the headless
+[sandbox](SANDBOX.md). Both drive the same verified-webhook path described here.
+
 ## Lifecycle
 
 1. A customer sends Thai order text to the LINE Official Account.

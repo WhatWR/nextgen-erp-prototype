@@ -64,7 +64,20 @@ COPY --chown=frappe:frappe data/imports /home/frappe/frappe-bench/imports
 
 RUN bench set-config -gp socketio_port 9000 \
     && ./env/bin/pip install --no-cache-dir --editable apps/nextgen_erp \
+    # esbuild writes compiled bundles to sites/assets/<app>/dist, but at runtime
+    # the `sites` volume mounts over sites/ and bench re-creates
+    # sites/assets/<app> as a symlink to the app's public/. Anything built into
+    # sites/ is therefore lost. Create that symlink *before* building so dist
+    # lands in the app's public/ inside the image, which is how erpnext's own
+    # bundles survive. Without this the Desk page loads but renders nothing.
+    && mkdir -p /home/frappe/frappe-bench/sites/assets \
+    && ln -sfn /home/frappe/frappe-bench/apps/nextgen_erp/nextgen_erp/public \
+        /home/frappe/frappe-bench/sites/assets/nextgen_erp \
     && bench build --app nextgen_erp \
+    # A stable, unhashed copy so the Desk page can load the bundle by path and
+    # never depends on the volume's assets.json being in step with this image.
+    && cp /home/frappe/frappe-bench/apps/nextgen_erp/nextgen_erp/public/dist/js/agent_workflow.bundle.*.js \
+        /home/frappe/frappe-bench/apps/nextgen_erp/nextgen_erp/public/dist/js/agent_workflow.bundle.js \
     && bench build --app erpnext_thailand \
     && bench build --app payments \
     && bench build --app webshop \

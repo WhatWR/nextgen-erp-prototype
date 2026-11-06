@@ -41,6 +41,11 @@ class ContractSurfaceTests(unittest.TestCase):
 			"create_proposal_request",
 			"proposal_reference",
 			"create_node_run_request",
+			"node_envelope",
+			"execute_node_request",
+			"node_result",
+			"workflow_state_request",
+			"workflow_state",
 		}
 		self.assertEqual(set(contracts.SCHEMAS), expected)
 

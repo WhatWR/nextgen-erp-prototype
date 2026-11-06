@@ -11,6 +11,11 @@ an inspectable inbox.
 **Local development only.** `scripts/deploy.sh` refuses an `.env.server` that
 points at the sandbox.
 
+For a *visual* stand-in that runs on the site itself — a LINE-style chat page for
+demonstrating the flow to people — see the
+[LINE simulator page](LINE_SIMULATOR.md). It drives the same signed-webhook path
+this sandbox does, but does not fake the AI gateway or the slip verifier.
+
 ## What it simulates
 
 | Real service | Sandbox endpoint | Behaviour |

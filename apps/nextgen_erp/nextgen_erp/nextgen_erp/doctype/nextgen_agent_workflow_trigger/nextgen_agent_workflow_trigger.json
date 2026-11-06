@@ -1,0 +1,29 @@
+{
+ "actions": [],
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": ["trigger_type", "enabled", "run_as", "column_break_config", "cron", "trigger_doctype", "doc_event", "condition", "section_state", "last_run_at", "next_run_at", "webhook_token"],
+ "fields": [
+  {"default": "Schedule", "fieldname": "trigger_type", "fieldtype": "Select", "in_list_view": 1, "label": "Trigger", "options": "Schedule\nWebhook\nDocument Event", "reqd": 1},
+  {"default": "0", "fieldname": "enabled", "fieldtype": "Check", "in_list_view": 1, "label": "Enabled"},
+  {"description": "The human whose ERP access authorises every run this trigger starts. An unattended trigger still acts as somebody, and never as Administrator.", "fieldname": "run_as", "fieldtype": "Link", "in_list_view": 1, "label": "Run As", "options": "User", "reqd": 1},
+  {"fieldname": "column_break_config", "fieldtype": "Column Break"},
+  {"depends_on": "eval:doc.trigger_type=='Schedule'", "description": "Five-field cron, evaluated every five minutes. Anything finer than that resolution is rounded up.", "fieldname": "cron", "fieldtype": "Data", "label": "Cron"},
+  {"depends_on": "eval:doc.trigger_type=='Document Event'", "fieldname": "trigger_doctype", "fieldtype": "Link", "label": "DocType", "options": "DocType"},
+  {"default": "after_insert", "depends_on": "eval:doc.trigger_type=='Document Event'", "fieldname": "doc_event", "fieldtype": "Select", "label": "Event", "options": "after_insert\non_update\non_submit\non_cancel"},
+  {"depends_on": "eval:doc.trigger_type=='Document Event'", "description": "Optional filters as JSON, for example {\"status\": \"To Deliver\"}. Compared against the document's own field values.", "fieldname": "condition", "fieldtype": "Small Text", "label": "Condition"},
+  {"fieldname": "section_state", "fieldtype": "Section Break", "label": "State"},
+  {"fieldname": "last_run_at", "fieldtype": "Datetime", "label": "Last Run At", "read_only": 1},
+  {"fieldname": "next_run_at", "fieldtype": "Datetime", "label": "Next Run At", "read_only": 1},
+  {"description": "Generated on save for a webhook trigger. Present it as the X-NextGen-Workflow-Token header.", "fieldname": "webhook_token", "fieldtype": "Password", "label": "Webhook Token"}
+ ],
+ "istable": 1,
+ "links": [],
+ "module": "NextGen ERP",
+ "name": "NextGen Agent Workflow Trigger",
+ "permissions": [],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": []
+}

@@ -1,13 +1,17 @@
 """Workflow graph parsing, validation and ordering.
 
-A workflow is a directed acyclic graph of agent nodes stored in the designer's
+A workflow is a directed acyclic graph of typed nodes stored in the designer's
 own format, so the canvas can round-trip it without translation. Frappe owns
 validation: a graph is checked on save, not at execution time, so the executor
 never has to reason about a malformed or cyclic definition.
 
-A node names an *agent*, never a tool. What that agent may actually do is still
-derived at run time from the company policy and the code allowlist, so a
-workflow definition can never grant a capability the policy withholds.
+Node semantics live in :mod:`nextgen_erp.agent_gateway.nodes`. This module only
+knows that a node *has* a kind and that the kind validates itself. An agent node
+names an *agent*, never a tool; what that agent may actually do is still derived
+at run time from the company policy and the code allowlist, so a workflow
+definition can never grant a capability the policy withholds. The same holds for
+a source or sink node: it names a DocType, a file or a connection, and the
+requester's own permissions decide whether it may read them.
 """
 
 from __future__ import annotations
@@ -18,9 +22,10 @@ from typing import Any
 import frappe
 from frappe import _
 
+from nextgen_erp.agent_gateway import nodes as node_kinds
+
 MAX_NODES = 40
 MAX_EDGES = 120
-NODE_TYPE = "agent"
 
 
 class GraphError(ValueError):
@@ -40,30 +45,54 @@ def parse(graph_json: Any) -> dict[str, list[dict[str, Any]]]:
 	edges = graph_json.get("edges") or []
 	if not isinstance(nodes, list) or not isinstance(edges, list):
 		raise GraphError(_("Workflow graph nodes and edges must be lists"))
-	return {"nodes": [n for n in nodes if isinstance(n, dict)], "edges": [e for e in edges if isinstance(e, dict)]}
+	return {
+		"nodes": [n for n in nodes if isinstance(n, dict)],
+		"edges": [e for e in edges if isinstance(e, dict)],
+	}
+
+
+# Node accessors stay exported here because callers already import them from
+# this module; the definitions themselves belong with the node kinds.
+node_data = node_kinds.node_data
+node_kind = node_kinds.node_kind
+node_label = node_kinds.node_label
+is_agent_node = node_kinds.is_agent
 
 
 def node_agent(node: dict[str, Any]) -> str:
-	data = node.get("data") if isinstance(node.get("data"), dict) else {}
-	return str(data.get("agent") or "").strip()
+	return str(node_kinds.node_data(node).get("agent") or "").strip()
 
 
 def node_prompt(node: dict[str, Any]) -> str:
-	data = node.get("data") if isinstance(node.get("data"), dict) else {}
-	return str(data.get("prompt") or "").strip()
+	return str(node_kinds.node_data(node).get("prompt") or "").strip()
 
 
-def node_label(node: dict[str, Any]) -> str:
-	data = node.get("data") if isinstance(node.get("data"), dict) else {}
-	return str(node.get("label") or data.get("label") or node.get("id") or "").strip()
+def find_node(graph: dict[str, list[dict[str, Any]]], node_id: str) -> dict[str, Any] | None:
+	return next((n for n in graph["nodes"] if str(n.get("id")) == str(node_id)), None)
+
+
+def parents(graph: dict[str, list[dict[str, Any]]], node_id: str) -> list[str]:
+	"""Ids feeding this node, in the order their sources appear on the canvas.
+
+	This is what makes an edge mean something. A node reads the output of the
+	nodes actually connected to it, not simply of whichever node happened to run
+	last, so a branch that fans out and merges again behaves as it is drawn.
+	"""
+	position = {str(n.get("id")): index for index, n in enumerate(ordered_ids(graph))}
+	sources = [
+		str(edge.get("source"))
+		for edge in graph["edges"]
+		if str(edge.get("target")) == str(node_id) and str(edge.get("source")) in position
+	]
+	return sorted(dict.fromkeys(sources), key=lambda source: position[source])
+
+
+def ordered_ids(graph: dict[str, list[dict[str, Any]]]) -> list[dict[str, Any]]:
+	return topological_order(graph)
 
 
 def validate(graph: dict[str, list[dict[str, Any]]], company: str | None = None) -> None:
 	"""Reject anything the executor should never have to handle."""
-	from nextgen_erp import agents
-	from nextgen_erp.agent_gateway import policy
-	from nextgen_erp.domain_tools import allowed_tool_names
-
 	nodes, edges = graph["nodes"], graph["edges"]
 	if not nodes:
 		raise GraphError(_("A workflow needs at least one node"))
@@ -80,24 +109,20 @@ def validate(graph: dict[str, list[dict[str, Any]]], company: str | None = None)
 		if node_id in ids:
 			raise GraphError(_("Duplicate workflow node id: {0}").format(node_id))
 		ids.add(node_id)
-
-		agent_key = node_agent(node)
-		if not agent_key:
-			raise GraphError(_("Node {0} does not name an agent").format(node_label(node) or node_id))
-		if agent_key not in agents.AGENTS:
-			raise GraphError(_("Node {0} references an unknown agent: {1}").format(node_id, agent_key))
-		if company and not allowed_tool_names(agent_key, company):
-			# The agent exists but this company's policy leaves it with nothing
-			# it may call, so the node could never do useful work.
-			raise GraphError(
-				_("Agent {0} has no tools allowed by the policy for {1}").format(agent_key, company)
-			)
+		try:
+			# Each kind validates its own configuration: the agent it names, the
+			# DocType it reads, the connection and path it may call.
+			node_kinds.validate_node(node, company)
+		except node_kinds.NodeError as exc:
+			raise GraphError(str(exc)) from exc
 
 	for edge in edges:
 		source = str(edge.get("source") or "").strip()
 		target = str(edge.get("target") or "").strip()
 		if source not in ids or target not in ids:
-			raise GraphError(_("Workflow edge references an unknown node: {0} -> {1}").format(source, target))
+			raise GraphError(
+				_("Workflow edge references an unknown node: {0} -> {1}").format(source, target)
+			)
 		if source == target:
 			raise GraphError(_("A workflow node cannot connect to itself: {0}").format(source))
 

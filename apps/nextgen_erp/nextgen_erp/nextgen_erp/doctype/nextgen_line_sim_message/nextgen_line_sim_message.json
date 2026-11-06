@@ -1,0 +1,28 @@
+{
+ "actions": [],
+ "autoname": "hash",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": ["recipient", "direction", "message_type", "column_break_identity", "sim_message_id", "content_file", "section_body", "text", "image_url"],
+ "fields": [
+  {"description": "Simulated LINE id this message belongs to. Always starts with the simulator prefix, so a real LINE recipient can never land here.", "fieldname": "recipient", "fieldtype": "Data", "in_list_view": 1, "in_standard_filter": 1, "label": "Recipient", "reqd": 1, "search_index": 1},
+  {"description": "Inbound is what the simulated customer sent; Outbound is what ERPNext pushed back instead of calling the LINE API.", "fieldname": "direction", "fieldtype": "Select", "in_list_view": 1, "in_standard_filter": 1, "label": "Direction", "options": "Inbound\nOutbound", "reqd": 1},
+  {"fieldname": "message_type", "fieldtype": "Select", "in_list_view": 1, "label": "Message Type", "options": "Text\nImage", "reqd": 1},
+  {"fieldname": "column_break_identity", "fieldtype": "Column Break"},
+  {"description": "Stands in for the LINE message id; the slip download resolves the attached file through it.", "fieldname": "sim_message_id", "fieldtype": "Data", "label": "Sim Message ID", "search_index": 1},
+  {"description": "Private File holding an uploaded payment slip.", "fieldname": "content_file", "fieldtype": "Attach", "label": "Content File"},
+  {"fieldname": "section_body", "fieldtype": "Section Break", "label": "Body"},
+  {"fieldname": "text", "fieldtype": "Long Text", "label": "Text"},
+  {"description": "Image pushed alongside the text, such as the amount-locked PromptPay QR.", "fieldname": "image_url", "fieldtype": "Data", "label": "Image URL"}
+ ],
+ "links": [],
+ "module": "NextGen ERP",
+ "name": "NextGen LINE Sim Message",
+ "permissions": [
+  {"delete": 1, "read": 1, "report": 1, "role": "System Manager"}
+ ],
+ "sort_field": "creation",
+ "sort_order": "ASC",
+ "states": [],
+ "track_changes": 0
+}

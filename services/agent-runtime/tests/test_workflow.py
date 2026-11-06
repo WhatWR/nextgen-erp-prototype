@@ -8,18 +8,22 @@ from nextgen_agent_runtime.orchestration.frappe_client import GatewayRejected
 from nextgen_agent_runtime.orchestration.workflow import (
     GraphError,
     WorkflowExecutor,
+    parents,
     topological_order,
 )
 from support import FakeGateway, make_config, run_context
 
 
-def node(node_id, agent="sales", x=0, prompt=""):
+def node(node_id, agent="sales", x=0, prompt="", kind="agent", **data):
+    payload = {"kind": kind, "prompt": prompt, **data}
+    if kind == "agent":
+        payload["agent"] = agent
     return {
         "id": node_id,
         "type": "agent",
         "label": node_id,
         "position": {"x": x, "y": 0},
-        "data": {"agent": agent, "prompt": prompt},
+        "data": payload,
     }
 
 
@@ -29,15 +33,33 @@ def chain(*ids, agent="sales"):
     return {"nodes": nodes, "edges": edges}
 
 
-class WorkflowGateway(FakeGateway):
-    """Adds node-run creation on top of the single-agent fake."""
+def envelope(node_id, text="", rows=None):
+    return {
+        "node_id": node_id,
+        "node_kind": "source.query",
+        "label": node_id,
+        "text": text or None,
+        "data": rows or [],
+        "row_count": len(rows or []),
+        "truncated": False,
+        "documents": [],
+        "artifacts": [],
+    }
 
-    def __init__(self, graph, node_status="Running", **kwargs):
+
+class WorkflowGateway(FakeGateway):
+    """Adds node-run creation, node execution and state on top of the fake."""
+
+    def __init__(self, graph, node_status="Running", state_nodes=None, **kwargs):
         super().__init__(**kwargs)
         self.parent = run_context(run_id="RUN-PARENT", graph=graph, workflow="WF-00001")
         self.node_runs: list[dict] = []
+        self.executed_nodes: list[dict] = []
         self.node_status = node_status
         self.node_error: Exception | None = None
+        self.state_nodes = state_nodes
+        self.node_outputs: dict[str, dict] = {}
+        self.node_failures: dict[str, str] = {}
 
     def create_node_run(self, **kwargs):
         if self.node_error:
@@ -52,6 +74,32 @@ class WorkflowGateway(FakeGateway):
             workflow_node=kwargs["node_id"],
             parent_run="RUN-PARENT",
         )
+
+    def execute_node(self, **kwargs):
+        self.executed_nodes.append(kwargs)
+        node_id = kwargs["node_id"]
+        if node_id in self.node_failures:
+            return {
+                "node_id": node_id,
+                "status": "Failed",
+                "output": None,
+                "error": self.node_failures[node_id],
+                "replayed": False,
+            }
+        return {
+            "node_id": node_id,
+            "status": "Completed",
+            "output": self.node_outputs.get(node_id, envelope(node_id, text=f"ran {node_id}")),
+            "replayed": False,
+        }
+
+    def get_workflow_state(self, **kwargs):
+        return {
+            "contract_version": "v2",
+            "run_id": "RUN-PARENT",
+            "status": "Running",
+            "nodes": self.state_nodes or [],
+        }
 
     def claim_run(self, run_id):
         self.claims += 1
@@ -85,9 +133,18 @@ class TopologicalOrderTests(unittest.TestCase):
         with self.assertRaises(GraphError):
             topological_order({"nodes": [], "edges": []})
 
+    def test_parents_are_the_nodes_actually_connected(self):
+        graph = {
+            "nodes": [node("a", x=0), node("b", x=1), node("c", x=2)],
+            "edges": [{"source": "a", "target": "c"}, {"source": "b", "target": "c"}],
+        }
+        order = topological_order(graph)
+        self.assertEqual(parents(graph, "c", order), ["a", "b"])
+        self.assertEqual(parents(graph, "a", order), [])
+
 
 class WorkflowExecutionTests(unittest.TestCase):
-    def test_each_node_becomes_its_own_child_run(self):
+    def test_each_agent_node_becomes_its_own_child_run(self):
         gateway = WorkflowGateway(chain("a", "b", "c"))
         executor, _ = _executor(gateway, ["one", "two", "three"])
         outcome = executor.execute(gateway.parent)
@@ -141,10 +198,95 @@ class WorkflowExecutionTests(unittest.TestCase):
         self.assertEqual(provider.calls, [])
 
 
+class DeterministicNodeTests(unittest.TestCase):
+    """excel -> agent -> report, and the other shapes that start outside a model."""
+
+    def _graph(self):
+        return {
+            "nodes": [
+                node("src", kind="source.excel", x=0, file="FILE-1"),
+                node("think", kind="agent", agent="sales", x=1),
+                node("out", kind="sink.report", x=2, format="html"),
+            ],
+            "edges": [
+                {"source": "src", "target": "think"},
+                {"source": "think", "target": "out"},
+            ],
+        }
+
+    def test_a_source_node_is_executed_by_frappe_not_by_the_runtime(self):
+        gateway = WorkflowGateway(self._graph())
+        executor, _ = _executor(gateway, ["สรุปแล้ว"])
+        outcome = executor.execute(gateway.parent)
+
+        self.assertEqual(outcome.status, "Completed")
+        self.assertEqual(outcome.nodes_run, ["src", "think", "out"])
+        # Only the agent node became a child run; the source and sink were
+        # executed inside Frappe.
+        self.assertEqual([call["node_id"] for call in gateway.node_runs], ["think"])
+        self.assertEqual([call["node_id"] for call in gateway.executed_nodes], ["src", "out"])
+
+    def test_the_runtime_sends_only_the_node_identity(self):
+        gateway = WorkflowGateway(self._graph())
+        executor, _ = _executor(gateway, ["ok"])
+        executor.execute(gateway.parent)
+        for call in gateway.executed_nodes:
+            self.assertEqual(
+                set(call),
+                {"parent_run_id", "node_id", "idempotency_key", "correlation_id"},
+            )
+
+    def test_source_rows_reach_the_agent_prompt(self):
+        gateway = WorkflowGateway(self._graph())
+        gateway.node_outputs["src"] = envelope(
+            "src", text="อ่านไฟล์ได้ 2 แถว", rows=[{"item": "M-150"}, {"item": "OISHI"}]
+        )
+        executor, _ = _executor(gateway, ["ok"])
+        executor.execute(gateway.parent)
+
+        prompt = " ".join(m["content"] for m in gateway.node_runs[0]["input_payload"]["messages"])
+        self.assertIn("M-150", prompt)
+        self.assertIn("อ่านไฟล์ได้ 2 แถว", prompt)
+
+    def test_a_failing_deterministic_node_fails_the_workflow(self):
+        gateway = WorkflowGateway(self._graph())
+        gateway.node_failures["src"] = "Unknown file: FILE-1"
+        executor, _ = _executor(gateway, ["ok"])
+        outcome = executor.execute(gateway.parent)
+
+        self.assertEqual(outcome.status, "Failed")
+        self.assertEqual(gateway.completed[-1]["status"], "Failed")
+        self.assertEqual(gateway.node_runs, [])
+
+
+class FanInTests(unittest.TestCase):
+    def test_a_merging_node_reads_every_parent(self):
+        graph = {
+            "nodes": [
+                node("db", kind="source.query", x=0, doctype="Sales Order"),
+                node("api", kind="source.api", x=1, connection="CRM", path="/v1/leads"),
+                node("merge", kind="agent", agent="sales", x=2),
+            ],
+            "edges": [
+                {"source": "db", "target": "merge"},
+                {"source": "api", "target": "merge"},
+            ],
+        }
+        gateway = WorkflowGateway(graph)
+        gateway.node_outputs["db"] = envelope("db", rows=[{"order": "SO-1"}])
+        gateway.node_outputs["api"] = envelope("api", rows=[{"lead": "L-9"}])
+        executor, _ = _executor(gateway, ["รวมแล้ว"])
+        executor.execute(gateway.parent)
+
+        prompt = " ".join(m["content"] for m in gateway.node_runs[0]["input_payload"]["messages"])
+        self.assertIn("SO-1", prompt)
+        self.assertIn("L-9", prompt)
+
+
 class WorkflowApprovalTests(unittest.TestCase):
-    def test_a_proposal_parks_the_workflow_and_stops_later_nodes(self):
-        gateway = WorkflowGateway(
-            chain("a", "b", "c"),
+    def _proposal_gateway(self, graph):
+        return WorkflowGateway(
+            graph,
             tool_results={
                 "prepare_sales_order": {
                     "status": "ok",
@@ -155,7 +297,9 @@ class WorkflowApprovalTests(unittest.TestCase):
                 }
             },
         )
-        provider = ScriptedModelProvider(
+
+    def _proposal_provider(self):
+        return ScriptedModelProvider(
             [
                 ModelResponse(
                     content="",
@@ -164,7 +308,10 @@ class WorkflowApprovalTests(unittest.TestCase):
                 ModelResponse(content="เตรียมข้อเสนอแล้ว"),
             ]
         )
-        executor = WorkflowExecutor(make_config(), gateway, provider)
+
+    def test_a_proposal_parks_the_workflow_and_stops_later_nodes(self):
+        gateway = self._proposal_gateway(chain("a", "b", "c"))
+        executor = WorkflowExecutor(make_config(), gateway, self._proposal_provider())
         outcome = executor.execute(gateway.parent)
 
         self.assertEqual(outcome.status, "Waiting Approval")
@@ -172,6 +319,41 @@ class WorkflowApprovalTests(unittest.TestCase):
         # A workflow never approves its own work: nodes b and c did not run.
         self.assertEqual(outcome.nodes_run, ["a"])
         self.assertEqual(gateway.completed[-1]["status"], "Waiting Approval")
+
+    def test_an_approved_workflow_resumes_where_it_parked(self):
+        gateway = WorkflowGateway(
+            chain("a", "b", "c"),
+            state_nodes=[
+                {"node_id": "a", "status": "Completed", "output": envelope("a", text="ทำแล้ว")},
+                {"node_id": "b", "status": "Pending"},
+                {"node_id": "c", "status": "Pending"},
+            ],
+        )
+        executor, provider = _executor(gateway, ["two", "three"])
+        outcome = executor.execute(gateway.parent)
+
+        self.assertEqual(outcome.status, "Completed")
+        self.assertEqual(outcome.nodes_run, ["a", "b", "c"])
+        # Node a is not executed a second time; its stored output is reused.
+        self.assertEqual([call["node_id"] for call in gateway.node_runs], ["b", "c"])
+        prompt = " ".join(m["content"] for m in gateway.node_runs[0]["input_payload"]["messages"])
+        self.assertIn("ทำแล้ว", prompt)
+
+    def test_a_rejected_proposal_cancels_the_workflow(self):
+        gateway = WorkflowGateway(
+            chain("a", "b"),
+            state_nodes=[
+                {"node_id": "a", "status": "Cancelled", "error": "A proposal was not approved"},
+                {"node_id": "b", "status": "Pending"},
+            ],
+        )
+        executor, provider = _executor(gateway, ["two"])
+        outcome = executor.execute(gateway.parent)
+
+        self.assertEqual(outcome.status, "Cancelled")
+        self.assertEqual(gateway.completed[-1]["status"], "Cancelled")
+        self.assertEqual(gateway.node_runs, [])
+        self.assertEqual(provider.calls, [])
 
     def test_the_executor_cannot_approve_anything(self):
         for forbidden in ("approve_proposal", "execute_proposal"):
@@ -202,6 +384,16 @@ class WorkflowFailClosedTests(unittest.TestCase):
         outcome = executor.execute(gateway.parent)
         self.assertEqual(outcome.status, "Failed")
         self.assertEqual(outcome.nodes_run, ["a"])
+
+    def test_unreadable_state_still_lets_a_fresh_workflow_run(self):
+        """State is an optimisation for resumption, not a precondition."""
+        gateway = WorkflowGateway(chain("a"))
+        gateway.get_workflow_state = lambda **kwargs: (_ for _ in ()).throw(
+            GatewayRejected("not available", 404)
+        )
+        executor, _ = _executor(gateway, ["one"])
+        outcome = executor.execute(gateway.parent)
+        self.assertEqual(outcome.status, "Completed")
 
 
 class WorkflowDispatchTests(unittest.TestCase):

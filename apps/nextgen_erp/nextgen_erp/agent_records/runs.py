@@ -197,6 +197,29 @@ def complete(
 	run.save(ignore_permissions=True)
 
 
+def reopen(run_id: str) -> None:
+	"""Return a parked workflow run to the queue so its graph can continue.
+
+	Only a run waiting on a human is reopenable. A Completed, Failed or
+	Cancelled run is finished for good: reopening one would let an approval
+	granted long after the fact restart work whose context has moved on.
+	"""
+	frappe.db.sql(f"select name from `tab{RUN_DOCTYPE}` where name=%s for update", run_id)
+	run = get_run(run_id)
+	if run.status != "Waiting Approval":
+		return
+	run.db_set(
+		{
+			"status": "Queued",
+			"ended_at": None,
+			"error_summary": None,
+			# The retry budget is per delivery attempt, not per resume.
+			"dispatch_attempts": 0,
+		},
+		update_modified=False,
+	)
+
+
 def mark_dispatched(run, *, attempts: int | None = None) -> None:
 	run.db_set(
 		{

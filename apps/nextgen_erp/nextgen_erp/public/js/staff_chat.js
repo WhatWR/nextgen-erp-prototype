@@ -1,4 +1,4 @@
-/* global frappe */
+/* global frappe, __ */
 
 (() => {
 	"use strict";
@@ -19,6 +19,11 @@
 		actions: new Map(),
 		lastInput: "",
 	};
+
+	// True while the user is near the bottom of the message list; streaming
+	// deltas only auto-scroll when pinned so reading history is never yanked.
+	let scrollPinned = true;
+	let deltaRaf = 0;
 
 	function escapeHtml(value) {
 		return String(value ?? "")
@@ -106,7 +111,7 @@
 	function agentChooserMessage() {
 		return {
 			role: "assistant",
-			content: "ต้องการใช้ผู้ช่วยด้านไหนคะ? เลือกได้จากตัวเลือกด้านล่าง หรือเปลี่ยนภายหลังได้จากเมนูด้านบน",
+			content: __("ต้องการใช้ผู้ช่วยด้านไหนคะ? เลือกได้จากตัวเลือกด้านล่าง หรือเปลี่ยนภายหลังได้จากเมนูด้านบน"),
 			agentChoices: state.agents.map((agent) => agent.key),
 		};
 	}
@@ -130,8 +135,8 @@
 		if (input && agent) {
 			input.placeholder =
 				agent.key === "procurement"
-					? "ถามเรื่องสต๊อก demand ความเสี่ยงของขาด หรือเตรียม PO..."
-					: "ถามข้อมูลสินค้า สต๊อก ราคา หรือสร้างออเดอร์...";
+					? __("ถามเรื่องสต๊อก demand ความเสี่ยงของขาด หรือเตรียม PO...")
+					: __("ถามข้อมูลสินค้า สต๊อก ราคา หรือสร้างออเดอร์...");
 		}
 	}
 
@@ -145,7 +150,7 @@
 		state.actions.clear();
 		state.messages = [welcomeMessage(agent)];
 		applyAgentTheme(agent);
-		render();
+		render({ forceScroll: true });
 		if (restore && state.sessionId) restoreSession(state.sessionId, false);
 	}
 
@@ -157,7 +162,7 @@
 		if (document.getElementById("nextgen-chat-launcher")) return;
 		const agentMenu = state.agents
 			.map(
-				(agent) => `<button type="button" data-agent="${escapeHtml(agent.key)}">
+				(agent) => `<button type="button" role="menuitem" data-agent="${escapeHtml(agent.key)}">
 					<img src="${escapeHtml(agent.icon)}" alt="">
 					<span><strong>${escapeHtml(agent.title)}</strong><small>${escapeHtml(agent.subtitle || "")}</small></span>
 				</button>`,
@@ -165,7 +170,7 @@
 			.join("");
 		document.body.insertAdjacentHTML(
 			"beforeend",
-			`<button id="nextgen-chat-launcher" type="button" aria-label="เปิด ${escapeHtml(state.brand)}" title="${escapeHtml(state.brand)}">
+			`<button id="nextgen-chat-launcher" type="button" aria-label="${__("เปิด {0}", [state.brand])}" title="${escapeHtml(state.brand)}">
 				<img src="${BRAND_ICON}" alt="" aria-hidden="true">
 				<span class="ng-launcher-label">${escapeHtml(state.brand)}</span>
 			</button>
@@ -174,7 +179,7 @@
 					<div class="ng-chat-brand">
 						<img id="nextgen-agent-icon" src="${BRAND_ICON}" alt="">
 						<div>
-							<button id="nextgen-agent-switcher" type="button" aria-haspopup="true" aria-expanded="false" title="เปลี่ยนผู้ช่วย">
+							<button id="nextgen-agent-switcher" type="button" aria-haspopup="true" aria-expanded="false" aria-controls="nextgen-agent-menu" title="${__("เปลี่ยนผู้ช่วย")}">
 								<strong id="nextgen-agent-title">${escapeHtml(state.brand)}</strong>
 								<span class="ng-caret" aria-hidden="true">▾</span>
 							</button>
@@ -182,22 +187,23 @@
 						</div>
 					</div>
 					<div class="ng-chat-header-actions">
-						<button data-action="history" title="ประวัติ">☰</button>
-						<button class="ng-new-chat-button" data-action="new" type="button" aria-label="เริ่มแชตใหม่" title="เริ่มแชตใหม่">
-							<span aria-hidden="true">＋</span><span>แชตใหม่</span>
+						<button data-action="history" type="button" aria-label="${__("ประวัติแชต")}" title="${__("ประวัติ")}">☰</button>
+						<button class="ng-new-chat-button" data-action="new" type="button" aria-label="${__("เริ่มแชตใหม่")}" title="${__("เริ่มแชตใหม่")}">
+							<span aria-hidden="true">＋</span><span>${__("แชตใหม่")}</span>
 						</button>
-						<button data-action="close" title="ปิด">×</button>
+						<button data-action="close" type="button" aria-label="${__("ปิดแชต")}" title="${__("ปิด")}">×</button>
 					</div>
 				</header>
-				<div id="nextgen-agent-menu" hidden>${agentMenu}</div>
+				<div id="nextgen-agent-menu" role="menu" hidden>${agentMenu}</div>
 				<div id="nextgen-chat-history" hidden></div>
-				<div id="nextgen-chat-messages" role="log" aria-live="polite"></div>
-				<div id="nextgen-chat-status"></div>
+				<div id="nextgen-chat-messages" role="log" aria-live="off"></div>
+				<div id="nextgen-chat-sr" class="ng-sr-only" aria-live="polite"></div>
+				<div id="nextgen-chat-status" role="status"></div>
 				<footer class="ng-chat-composer">
-					<textarea id="nextgen-chat-input" rows="2" maxlength="4000" placeholder="พิมพ์คำถาม..."></textarea>
+					<textarea id="nextgen-chat-input" rows="2" maxlength="4000" aria-label="${__("พิมพ์ข้อความถามผู้ช่วย")}" placeholder="${__("พิมพ์คำถาม...")}"></textarea>
 					<div>
-						<button id="nextgen-chat-stop" type="button" hidden>หยุด</button>
-						<button id="nextgen-chat-send" type="button">ส่ง</button>
+						<button id="nextgen-chat-stop" type="button" hidden>${__("หยุด")}</button>
+						<button id="nextgen-chat-send" type="button">${__("ส่ง")}</button>
 					</div>
 				</footer>
 			</aside>`,
@@ -221,6 +227,38 @@
 		});
 		document.getElementById("nextgen-chat-messages").addEventListener("click", handleMessageClick);
 		document.getElementById("nextgen-chat-history").addEventListener("click", handleHistoryClick);
+
+		const messages = document.getElementById("nextgen-chat-messages");
+		messages.addEventListener("scroll", () => {
+			scrollPinned =
+				messages.scrollHeight - messages.scrollTop - messages.clientHeight < 80;
+		});
+
+		// Dismiss the agent menu on outside click without swallowing the click.
+		document.addEventListener("click", (event) => {
+			const menu = document.getElementById("nextgen-agent-menu");
+			const switcher = document.getElementById("nextgen-agent-switcher");
+			if (menu.hidden) return;
+			if (menu.contains(event.target) || switcher.contains(event.target)) return;
+			setAgentMenuOpen(false);
+		});
+
+		// Menu keyboard support: Escape closes, arrows move between agents.
+		document.getElementById("nextgen-agent-menu").addEventListener("keydown", (event) => {
+			const items = [...event.currentTarget.querySelectorAll("[data-agent]")];
+			const index = items.indexOf(document.activeElement);
+			if (event.key === "Escape") {
+				event.preventDefault();
+				setAgentMenuOpen(false);
+				document.getElementById("nextgen-agent-switcher").focus();
+			} else if (event.key === "ArrowDown") {
+				event.preventDefault();
+				items[(index + 1) % items.length]?.focus();
+			} else if (event.key === "ArrowUp") {
+				event.preventDefault();
+				items[(index - 1 + items.length) % items.length]?.focus();
+			}
+		});
 
 		// Pre-select the stored agent so the header is never anonymous.
 		const stored = window.localStorage.getItem(ACTIVE_AGENT_KEY);
@@ -260,24 +298,34 @@
 	function close() {
 		state.open = false;
 		const panel = document.getElementById("nextgen-chat-panel");
+		const hadFocus = panel?.contains(document.activeElement);
 		panel?.classList.remove("is-open");
 		panel?.setAttribute("aria-hidden", "true");
+		setAgentMenuOpen(false);
+		// Return focus to the launcher so keyboard users keep their place.
+		if (hadFocus) document.getElementById("nextgen-chat-launcher")?.focus();
+	}
+
+	function setAgentMenuOpen(openMenu, { focusFirst = false } = {}) {
 		const menu = document.getElementById("nextgen-agent-menu");
-		if (menu) menu.hidden = true;
+		const switcher = document.getElementById("nextgen-agent-switcher");
+		if (!menu || !switcher) return;
+		menu.hidden = !openMenu;
+		switcher.setAttribute("aria-expanded", String(openMenu));
+		if (openMenu && focusFirst) menu.querySelector("[data-agent]")?.focus();
 	}
 
 	function toggleAgentMenu() {
 		const menu = document.getElementById("nextgen-agent-menu");
-		const switcher = document.getElementById("nextgen-agent-switcher");
-		menu.hidden = !menu.hidden;
-		switcher.setAttribute("aria-expanded", String(!menu.hidden));
+		setAgentMenuOpen(menu.hidden, { focusFirst: menu.hidden });
 	}
 
 	function handleAgentMenuClick(event) {
 		const button = event.target.closest("[data-agent]");
 		if (!button) return;
-		document.getElementById("nextgen-agent-menu").hidden = true;
+		setAgentMenuOpen(false);
 		if (button.dataset.agent !== state.agentKey) selectAgent(button.dataset.agent);
+		document.getElementById("nextgen-chat-input")?.focus();
 	}
 
 	function newChat() {
@@ -289,7 +337,7 @@
 		if (state.agentKey) window.localStorage.removeItem(sessionStorageKey(state.agentKey));
 		state.messages = agent ? [welcomeMessage(agent)] : [agentChooserMessage()];
 		document.getElementById("nextgen-chat-history").hidden = true;
-		document.getElementById("nextgen-agent-menu").hidden = true;
+		setAgentMenuOpen(false);
 		document.getElementById("nextgen-chat-input").value = "";
 		setStatus("");
 		render();
@@ -316,8 +364,8 @@
 		state.messages.push(pending);
 		state.turnId = makeTurnId();
 		pending.turnId = state.turnId;
-		setBusy(true, "Typhoon กำลังตรวจข้อมูล ERP...");
-		render();
+		setBusy(true, __("Typhoon กำลังตรวจข้อมูล ERP..."));
+		render({ forceScroll: true });
 		try {
 			const result = await call("start_turn", {
 				session_id: state.sessionId,
@@ -333,7 +381,7 @@
 		} catch (error) {
 			pending.pending = false;
 			pending.error = true;
-			pending.content = error?.message || "ไม่สามารถเริ่มแชตได้";
+			pending.content = error?.message || __("ไม่สามารถเริ่มแชตได้");
 			state.turnId = null;
 			setBusy(false);
 			render();
@@ -368,6 +416,7 @@
 					state.turnId = null;
 					setBusy(false);
 					render();
+					announce(pending.content);
 					return;
 				}
 			} catch {
@@ -381,7 +430,7 @@
 				if (pending) {
 					pending.pending = false;
 					pending.error = true;
-					pending.content ||= "คำตอบใช้เวลานานกว่าปกติ กรุณาลองอีกครั้งค่ะ";
+					pending.content ||= __("คำตอบใช้เวลานานกว่าปกติ กรุณาลองอีกครั้งค่ะ");
 				}
 				state.turnId = null;
 				setBusy(false);
@@ -396,10 +445,11 @@
 		const pending = [...state.messages].reverse().find((message) => message.pending);
 		if (pending) {
 			pending.pending = false;
-			pending.content ||= "หยุดแสดงคำตอบแล้ว งานฝั่งเซิร์ฟเวอร์จะสิ้นสุดอย่างปลอดภัยค่ะ";
+			pending.content ||= __("หยุดแสดงคำตอบแล้ว งานฝั่งเซิร์ฟเวอร์จะสิ้นสุดอย่างปลอดภัยค่ะ");
 		}
 		setBusy(false);
 		render();
+		announce(pending?.content);
 	}
 
 	function onRealtime(event) {
@@ -409,9 +459,9 @@
 		if (!pending) return;
 		if (event.type === "delta") {
 			pending.content += event.text || "";
-			render();
+			scheduleDeltaRender(pending);
 		} else if (event.type === "tool") {
-			setStatus(`กำลังใช้เครื่องมือ: ${event.name}`);
+			setStatus(__("กำลังใช้เครื่องมือ: {0}", [event.name]));
 		} else if (event.type === "action") {
 			pending.action = event.action;
 			state.actions.set(event.action.action_id, event.action);
@@ -427,13 +477,15 @@
 			state.turnId = null;
 			setBusy(false);
 			render();
+			announce(pending.content);
 		} else if (event.type === "error") {
 			pending.pending = false;
 			pending.error = true;
-			pending.content ||= event.message || "ผู้ช่วยไม่พร้อมใช้งาน";
+			pending.content ||= event.message || __("ผู้ช่วยไม่พร้อมใช้งาน");
 			state.turnId = null;
 			setBusy(false);
 			render();
+			announce(pending.content);
 		}
 	}
 
@@ -454,8 +506,23 @@
 	// Cards
 	// ------------------------------------------------------------------
 
+	// Shared shell for every actionable card: title bar, body, warnings,
+	// status-dependent button row, and the result/document link line.
+	function cardShell({ extraClass = "", id, title, badge = "", body = "", warningsHtml = "", buttonsHtml = "", statusText = "", resultType = null, resultName = null }) {
+		const resultLink = resultType && resultName
+			? ` · <button type="button" class="ng-doc-link" data-document-type="${escapeHtml(resultType)}" data-document-name="${escapeHtml(resultName)}">${escapeHtml(resultName)}</button>`
+			: "";
+		return `<section class="ng-action-card ${extraClass}" data-action-id="${escapeHtml(id)}">
+			<div class="ng-action-title"><strong>${title}</strong>${badge}</div>
+			${body}
+			${warningsHtml}
+			${buttonsHtml}
+			<div class="ng-action-result">${statusText ? escapeHtml(statusText) : ""}${resultLink}</div>
+		</section>`;
+	}
+
 	function riskBadge(risk) {
-		const labels = { high: "เสี่ยงสูง", medium: "เสี่ยงปานกลาง", low: "เสี่ยงต่ำ" };
+		const labels = { high: __("เสี่ยงสูง"), medium: __("เสี่ยงปานกลาง"), low: __("เสี่ยงต่ำ") };
 		return `<span class="ng-risk ng-risk-${escapeHtml(risk || "low")}">${labels[risk] || escapeHtml(risk || "-")}</span>`;
 	}
 
@@ -465,16 +532,16 @@
 			.map((warning) => `<li>${escapeHtml(warning)}</li>`)
 			.join("");
 		const rows = [
-			["สต๊อกปัจจุบัน", `${num(forecast.actual_qty)} ${escapeHtml(forecast.stock_uom || "")}`],
-			["จองแล้ว", num(forecast.reserved_qty)],
-			["กำลังมา (PO)", num(forecast.incoming_qty)],
-			["Demand 30/60/90 วัน", `${num(forecast.demand_30)} / ${num(forecast.demand_60)} / ${num(forecast.demand_90)}`],
-			["เฉลี่ยต่อวัน", num(forecast.average_daily_demand, 2)],
-			["Lead time", `${num(forecast.lead_time_days)} วัน`],
-			["Days of supply", forecast.days_of_supply == null ? "-" : `${num(forecast.days_of_supply, 1)} วัน`],
-			["Reorder point", num(forecast.reorder_point, 1)],
-			["จำนวนแนะนำ", `<strong>${num(forecast.suggested_qty)} ${escapeHtml(forecast.stock_uom || "")}</strong>`],
-			["คาดว่าจะขาด", forecast.stockout_date ? escapeHtml(forecast.stockout_date) : "-"],
+			[__("สต๊อกปัจจุบัน"), `${num(forecast.actual_qty)} ${escapeHtml(forecast.stock_uom || "")}`],
+			[__("จองแล้ว"), num(forecast.reserved_qty)],
+			[__("กำลังมา (PO)"), num(forecast.incoming_qty)],
+			[__("Demand 30/60/90 วัน"), `${num(forecast.demand_30)} / ${num(forecast.demand_60)} / ${num(forecast.demand_90)}`],
+			[__("เฉลี่ยต่อวัน"), num(forecast.average_daily_demand, 2)],
+			[__("Lead time"), __("{0} วัน", [num(forecast.lead_time_days)])],
+			[__("Days of supply"), forecast.days_of_supply == null ? "-" : __("{0} วัน", [num(forecast.days_of_supply, 1)])],
+			[__("Reorder point"), num(forecast.reorder_point, 1)],
+			[__("จำนวนแนะนำ"), `<strong>${num(forecast.suggested_qty)} ${escapeHtml(forecast.stock_uom || "")}</strong>`],
+			[__("คาดว่าจะขาด"), forecast.stockout_date ? escapeHtml(forecast.stockout_date) : "-"],
 		]
 			.map(([label, value]) => `<div class="ng-forecast-metric"><small>${label}</small><span>${value}</span></div>`)
 			.join("");
@@ -486,14 +553,14 @@
 				<strong>Forecast: ${escapeHtml(forecast.item_name || forecast.item_code)}</strong>
 				${riskBadge(forecast.stockout_risk)}
 			</div>
-			<div class="ng-forecast-sub">${escapeHtml(forecast.item_code)} · Horizon ${num(forecast.horizon_days)} วัน · Data quality ${Math.round(Number(forecast.data_quality_score || 0) * 100)}%</div>
+			<div class="ng-forecast-sub">${escapeHtml(forecast.item_code)} · ${__("Horizon {0} วัน", [num(forecast.horizon_days)])} · Data quality ${Math.round(Number(forecast.data_quality_score || 0) * 100)}%</div>
 			<div class="ng-forecast-grid">${rows}</div>
 			${warnings ? `<ul class="ng-action-warnings">${warnings}</ul>` : ""}
 			<div class="ng-forecast-footer">${escapeHtml(forecast.formula_version || "")}</div>
 			<div class="ng-message-actions">
-				<button data-generate-forecast="${itemCode}">บันทึก Forecast</button>
-				<button data-chat-prompt="สร้าง Purchase Order Preview สำหรับ ${itemCode} จำนวน ${qty} ${uom} จาก Forecast ล่าสุด">สร้าง PO Preview</button>
-				<button data-chat-prompt="สร้าง Material Request Preview สำหรับ ${itemCode} จำนวน ${qty} ${uom} จาก Forecast ล่าสุด">สร้าง MR Preview</button>
+				<button type="button" data-generate-forecast="${itemCode}">${__("บันทึก Forecast")}</button>
+				<button type="button" data-chat-prompt="สร้าง Purchase Order Preview สำหรับ ${itemCode} จำนวน ${qty} ${uom} จาก Forecast ล่าสุด">${__("สร้าง PO Preview")}</button>
+				<button type="button" data-chat-prompt="สร้าง Material Request Preview สำหรับ ${itemCode} จำนวน ${qty} ${uom} จาก Forecast ล่าสุด">${__("สร้าง MR Preview")}</button>
 			</div>
 		</section>`;
 	}
@@ -505,32 +572,32 @@
 				const premium = Number(row.price_premium_percent || 0);
 				const premiumLabel = premium > 0
 					? `<small class="ng-var-up">+${premium.toFixed(2)}%</small>`
-					: (row.last_rate > 0 ? '<small class="ng-var-down">ต่ำสุด</small>' : "");
+					: (row.last_rate > 0 ? `<small class="ng-var-down">${__("ต่ำสุด")}</small>` : "");
 				const onTime = row.on_time_rate == null
-					? "ไม่มีข้อมูล"
+					? __("ไม่มีข้อมูล")
 					: `${Math.round(Number(row.on_time_rate) * 100)}%`;
-				const leadNote = row.measured_lead_days == null ? " (ประมาณ)" : "";
+				const leadNote = row.measured_lead_days == null ? ` ${__("(ประมาณ)")}` : "";
 				return `<tr class="${row.recommended ? "ng-vendor-recommended" : ""}">
 					<td>${row.recommended ? "★ " : ""}${escapeHtml(row.supplier_name || row.supplier)}<small>${escapeHtml(row.supplier)}</small></td>
 					<td>${row.last_rate > 0 ? num(row.last_rate, 2) : "-"} ${premiumLabel}</td>
-					<td>${num(row.effective_lead_days, 1)} วัน${leadNote}</td>
+					<td>${__("{0} วัน", [num(row.effective_lead_days, 1)])}${leadNote}</td>
 					<td>${onTime}</td>
 					<td>${num(row.order_count)}</td>
-					<td><button class="ng-doc-link" data-use-supplier="${escapeHtml(row.supplier)}" data-use-item="${escapeHtml(data.item_code || "")}">ใช้รายนี้</button></td>
+					<td><button type="button" class="ng-doc-link" data-use-supplier="${escapeHtml(row.supplier)}" data-use-item="${escapeHtml(data.item_code || "")}">${__("ใช้รายนี้")}</button></td>
 				</tr>`;
 			})
 			.join("");
 		const recommended = data.recommended || {};
 		return `<section class="ng-forecast-card ng-comparison-card">
 			<div class="ng-forecast-title">
-				<strong>เปรียบเทียบ Supplier: ${escapeHtml(data.item_name || data.item_code)}</strong>
-				<span class="ng-priority-chip ng-priority-${escapeHtml(data.priority || "balanced")}">${escapeHtml(data.priority_label || "ปกติ")}</span>
+				<strong>${__("เปรียบเทียบ Supplier: {0}", [escapeHtml(data.item_name || data.item_code)])}</strong>
+				<span class="ng-priority-chip ng-priority-${escapeHtml(data.priority || "balanced")}">${escapeHtml(data.priority_label || __("ปกติ"))}</span>
 			</div>
 			<div class="ng-comparison-scroll"><table><thead>
-				<tr><th>Supplier</th><th>ราคาล่าสุด</th><th>Lead จริง</th><th>ตรงเวลา</th><th>ออเดอร์</th><th></th></tr>
+				<tr><th>Supplier</th><th>${__("ราคาล่าสุด")}</th><th>${__("Lead จริง")}</th><th>${__("ตรงเวลา")}</th><th>${__("ออเดอร์")}</th><th></th></tr>
 			</thead><tbody>${rows}</tbody></table></div>
 			${recommended.reason ? `<div class="ng-priority-note">${escapeHtml(recommended.reason)}</div>` : ""}
-			<div class="ng-forecast-footer">คำนวณจาก PO และการรับของจริงใน ERP เท่านั้น</div>
+			<div class="ng-forecast-footer">${__("คำนวณจาก PO และการรับของจริงใน ERP เท่านั้น")}</div>
 		</section>`;
 	}
 
@@ -565,9 +632,9 @@
 				changes: JSON.stringify({ supplier }),
 			});
 			applyActionReplacement(pendingPO.action_id, replacement);
-			frappe.show_alert({ message: `เปลี่ยน supplier เป็น ${supplier} แล้ว`, indicator: "green" });
+			frappe.show_alert({ message: __("เปลี่ยน supplier เป็น {0} แล้ว", [supplier]), indicator: "green" });
 		} catch (error) {
-			frappe.msgprint(error?.message || "เปลี่ยน supplier ไม่สำเร็จ");
+			frappe.msgprint(error?.message || __("เปลี่ยน supplier ไม่สำเร็จ"));
 		}
 	}
 
@@ -583,13 +650,13 @@
 		) return "";
 		if (state.agentKey === "procurement") {
 			return `<div class="ng-message-actions ng-inline-actions">
-				<button data-generate-forecast="">Generate Forecast</button>
-				<button data-chat-prompt="สร้าง Purchase Order Preview จากคำแนะนำล่าสุด โดยใช้ข้อมูล ERP ปัจจุบัน">สร้าง PO Preview</button>
-				<button data-chat-prompt="สร้าง Material Request Preview จากคำแนะนำล่าสุด โดยใช้ข้อมูล ERP ปัจจุบัน">สร้าง MR Preview</button>
+				<button type="button" data-generate-forecast="">Generate Forecast</button>
+				<button type="button" data-chat-prompt="สร้าง Purchase Order Preview จากคำแนะนำล่าสุด โดยใช้ข้อมูล ERP ปัจจุบัน">${__("สร้าง PO Preview")}</button>
+				<button type="button" data-chat-prompt="สร้าง Material Request Preview จากคำแนะนำล่าสุด โดยใช้ข้อมูล ERP ปัจจุบัน">${__("สร้าง MR Preview")}</button>
 			</div>`;
 		}
 		return `<div class="ng-message-actions ng-inline-actions">
-			<button data-start-sales-order="1">เริ่มสร้างออเดอร์</button>
+			<button type="button" data-start-sales-order="1">${__("เริ่มสร้างออเดอร์")}</button>
 		</div>`;
 	}
 
@@ -609,12 +676,12 @@
 					Number(item.order_multiple) ? `x${num(item.order_multiple)}` : "",
 				].filter(Boolean).join(" · ");
 				const manualTag = item.rate_overridden
-					? '<small class="ng-manual-rate">กำหนดเอง</small>'
+					? `<small class="ng-manual-rate">${__("กำหนดเอง")}</small>`
 					: "";
 				return `<tr>
 					<td>${escapeHtml(item.item_code)}<small>${escapeHtml(item.item_name || "")}${constraint ? ` · ${constraint}` : ""}</small></td>
-					<td>${num(item.qty)} ${escapeHtml(item.uom || "")}<small>แนะนำ ${num(item.suggested_qty)}</small></td>
-					<td>${num(item.rate, 2)} ${manualTag}<small>ล่าสุด ${num(item.last_purchase_rate, 2)} ${varianceLabel}</small></td>
+					<td>${num(item.qty)} ${escapeHtml(item.uom || "")}<small>${__("แนะนำ {0}", [num(item.suggested_qty)])}</small></td>
+					<td>${num(item.rate, 2)} ${manualTag}<small>${__("ล่าสุด {0}", [num(item.last_purchase_rate, 2)])} ${varianceLabel}</small></td>
 					<td>${num(item.amount, 2)}</td>
 				</tr>`;
 			})
@@ -628,27 +695,33 @@
 			? `<span class="ng-priority-chip ng-priority-${escapeHtml(preview.priority)}">${escapeHtml(preview.priority_label || preview.priority)}</span>`
 			: "";
 		const autoPicked = preview.supplier_auto_selected
-			? ' <small class="ng-auto-picked">(ระบบเลือกให้)</small>'
+			? ` <small class="ng-auto-picked">${__("(ระบบเลือกให้)")}</small>`
 			: "";
-		return `<section class="ng-action-card ng-procurement-card" data-action-id="${escapeHtml(action.action_id)}">
-			<div class="ng-action-title"><strong>${title}</strong>${priorityChip}<span>Data quality ${Math.round(Number(preview.data_quality_score ?? action.confidence ?? 0) * 100)}%</span></div>
-			<div class="ng-action-customer">
-				${isPO ? `Supplier: <strong>${escapeHtml(preview.supplier_name || preview.supplier || "-")}</strong>${autoPicked}<br>` : ""}
-				บริษัท: ${escapeHtml(preview.company || "-")} · คลัง: ${escapeHtml(preview.warehouse || "-")}<br>
-				กำหนดรับของ: ${escapeHtml(preview.schedule_date || "-")} · โหมด: ${escapeHtml(preview.automation_mode || "-")}
-			</div>
-			${preview.priority_note ? `<div class="ng-priority-note">${escapeHtml(preview.priority_note)}</div>` : ""}
-			<table><tbody>${items}</tbody></table>
-			<div class="ng-action-total">รวม ${num(preview.total, 2)} THB</div>
-			${warnings ? `<ul class="ng-action-warnings">${warnings}</ul>` : ""}
-			${preview.forecast_explanation ? `<div class="ng-forecast-footer">${escapeHtml(preview.forecast_explanation)}</div>` : ""}
-			<div class="ng-action-buttons" ${status !== "Pending" ? "hidden" : ""}>
-				<button data-confirm-action="${escapeHtml(action.action_id)}">ยืนยันและสร้าง</button>
-				<button class="secondary" data-edit-action="${escapeHtml(action.action_id)}">แก้ข้อมูล</button>
-				<button class="secondary" data-cancel-action="${escapeHtml(action.action_id)}">ยกเลิก</button>
-			</div>
-			<div class="ng-action-result">${status !== "Pending" ? escapeHtml(status) : ""}${resultType && resultName ? ` · <button class="ng-doc-link" data-document-type="${escapeHtml(resultType)}" data-document-name="${escapeHtml(resultName)}">${escapeHtml(resultName)}</button>` : ""}</div>
-		</section>`;
+		return cardShell({
+			extraClass: "ng-procurement-card",
+			id: action.action_id,
+			title,
+			badge: `${priorityChip}<span>Data quality ${Math.round(Number(preview.data_quality_score ?? action.confidence ?? 0) * 100)}%</span>`,
+			body: `
+				<div class="ng-action-customer">
+					${isPO ? `Supplier: <strong>${escapeHtml(preview.supplier_name || preview.supplier || "-")}</strong>${autoPicked}<br>` : ""}
+					${__("บริษัท")}: ${escapeHtml(preview.company || "-")} · ${__("คลัง")}: ${escapeHtml(preview.warehouse || "-")}<br>
+					${__("กำหนดรับของ")}: ${escapeHtml(preview.schedule_date || "-")} · ${__("โหมด")}: ${escapeHtml(preview.automation_mode || "-")}
+				</div>
+				${preview.priority_note ? `<div class="ng-priority-note">${escapeHtml(preview.priority_note)}</div>` : ""}
+				<table><tbody>${items}</tbody></table>
+				<div class="ng-action-total">${__("รวม {0} THB", [num(preview.total, 2)])}</div>
+				${preview.forecast_explanation ? `<div class="ng-forecast-footer">${escapeHtml(preview.forecast_explanation)}</div>` : ""}`,
+			warningsHtml: warnings ? `<ul class="ng-action-warnings">${warnings}</ul>` : "",
+			buttonsHtml: `<div class="ng-action-buttons" ${status !== "Pending" ? "hidden" : ""}>
+				<button type="button" data-confirm-action="${escapeHtml(action.action_id)}">${__("ยืนยันและสร้าง")}</button>
+				<button type="button" class="secondary" data-edit-action="${escapeHtml(action.action_id)}">${__("แก้ข้อมูล")}</button>
+				<button type="button" class="secondary" data-cancel-action="${escapeHtml(action.action_id)}">${__("ยกเลิก")}</button>
+			</div>`,
+			statusText: status !== "Pending" ? status : "",
+			resultType,
+			resultName,
+		});
 	}
 
 	function salesActionCard(action) {
@@ -663,18 +736,23 @@
 		const result = action.result || {};
 		const resultType = action.result_doctype || result.document_type;
 		const resultName = action.result_name || result.document_name;
-		return `<section class="ng-action-card" data-action-id="${escapeHtml(action.action_id)}">
-			<div class="ng-action-title"><strong>Sales Order Preview</strong><span>${Math.round(Number(preview.confidence || 0) * 100)}%</span></div>
-			<div class="ng-action-customer">ลูกค้า: <strong>${escapeHtml(preview.customer_name || preview.customer)}</strong></div>
-			<table><tbody>${items}</tbody></table>
-			<div class="ng-action-total">รวม ${num(preview.total, 2)} THB</div>
-			${warnings ? `<ul class="ng-action-warnings">${warnings}</ul>` : ""}
-			<div class="ng-action-buttons" ${status !== "Pending" ? "hidden" : ""}>
-				<button data-confirm-action="${escapeHtml(action.action_id)}">ยืนยันและดำเนินการ</button>
-				<button class="secondary" data-cancel-action="${escapeHtml(action.action_id)}">ยกเลิก</button>
-			</div>
-			<div class="ng-action-result">${status !== "Pending" ? escapeHtml(status) : ""}${resultType && resultName ? ` · <button class="ng-doc-link" data-document-type="${escapeHtml(resultType)}" data-document-name="${escapeHtml(resultName)}">${escapeHtml(resultName)}</button>` : ""}</div>
-		</section>`;
+		return cardShell({
+			id: action.action_id,
+			title: "Sales Order Preview",
+			badge: `<span>${Math.round(Number(preview.confidence || 0) * 100)}%</span>`,
+			body: `
+				<div class="ng-action-customer">${__("ลูกค้า")}: <strong>${escapeHtml(preview.customer_name || preview.customer)}</strong></div>
+				<table><tbody>${items}</tbody></table>
+				<div class="ng-action-total">${__("รวม {0} THB", [num(preview.total, 2)])}</div>`,
+			warningsHtml: warnings ? `<ul class="ng-action-warnings">${warnings}</ul>` : "",
+			buttonsHtml: `<div class="ng-action-buttons" ${status !== "Pending" ? "hidden" : ""}>
+				<button type="button" data-confirm-action="${escapeHtml(action.action_id)}">${__("ยืนยันและดำเนินการ")}</button>
+				<button type="button" class="secondary" data-cancel-action="${escapeHtml(action.action_id)}">${__("ยกเลิก")}</button>
+			</div>`,
+			statusText: status !== "Pending" ? status : "",
+			resultType,
+			resultName,
+		});
 	}
 
 	function documentActionCard(action) {
@@ -696,20 +774,26 @@
 		// The proposal ID is the identifier here; there is no legacy chat action.
 		const id = action.proposal_id || action.action_id;
 		const open = status === "Pending Approval" || status === "Pending";
-		return `<section class="ng-action-card ng-document-card" data-action-id="${escapeHtml(id)}">
-			<div class="ng-action-title"><strong>${escapeHtml(preview.doctype || "Document")}</strong><span>ข้อเสนอ</span></div>
-			<div class="ng-action-customer">
-				บริษัท: ${escapeHtml(preview.company || "-")}${preview.purpose ? `<br>${escapeHtml(preview.purpose)}` : ""}
-			</div>
-			<table><tbody>${rows}</tbody></table>
-			<div class="ng-action-total">ยังไม่บันทึกลง ERP จนกว่าคุณจะกดอนุมัติ</div>
-			${warnings ? `<ul class="ng-action-warnings">${warnings}</ul>` : ""}
-			<div class="ng-action-buttons" ${open ? "" : "hidden"}>
-				<button data-approve-proposal="${escapeHtml(id)}">อนุมัติและสร้าง</button>
-				<button class="secondary" data-reject-proposal="${escapeHtml(id)}">ปฏิเสธ</button>
-			</div>
-			<div class="ng-action-result">${!open ? escapeHtml(status) : ""}${resultType && resultName ? ` · <button class="ng-doc-link" data-document-type="${escapeHtml(resultType)}" data-document-name="${escapeHtml(resultName)}">${escapeHtml(resultName)}</button>` : ""}</div>
-		</section>`;
+		return cardShell({
+			extraClass: "ng-document-card",
+			id,
+			title: escapeHtml(preview.doctype || "Document"),
+			badge: `<span>${__("ข้อเสนอ")}</span>`,
+			body: `
+				<div class="ng-action-customer">
+					${__("บริษัท")}: ${escapeHtml(preview.company || "-")}${preview.purpose ? `<br>${escapeHtml(preview.purpose)}` : ""}
+				</div>
+				<table><tbody>${rows}</tbody></table>
+				<div class="ng-action-total">${__("ยังไม่บันทึกลง ERP จนกว่าคุณจะกดอนุมัติ")}</div>`,
+			warningsHtml: warnings ? `<ul class="ng-action-warnings">${warnings}</ul>` : "",
+			buttonsHtml: `<div class="ng-action-buttons" ${open ? "" : "hidden"}>
+				<button type="button" data-approve-proposal="${escapeHtml(id)}">${__("อนุมัติและสร้าง")}</button>
+				<button type="button" class="secondary" data-reject-proposal="${escapeHtml(id)}">${__("ปฏิเสธ")}</button>
+			</div>`,
+			statusText: !open ? status : "",
+			resultType,
+			resultName,
+		});
 	}
 
 	function actionCard(action) {
@@ -724,40 +808,71 @@
 		return salesActionCard(action);
 	}
 
-	function render() {
+	function render({ forceScroll = false } = {}) {
 		const container = document.getElementById("nextgen-chat-messages");
 		if (!container) return;
 		container.innerHTML = state.messages
 			.map((message, index) => {
 				const suggestions = (message.suggestions || [])
-					.map((value) => `<button data-suggestion="${escapeHtml(value)}">${escapeHtml(value)}</button>`)
+					.map((value) => `<button type="button" data-suggestion="${escapeHtml(value)}">${escapeHtml(value)}</button>`)
 					.join("");
 				const agentChoices = (message.agentChoices || [])
 					.map((key) => {
 						const agent = agentByKey(key);
 						if (!agent) return "";
-						return `<button class="ng-agent-choice" data-choose-agent="${escapeHtml(key)}">
+						return `<button type="button" class="ng-agent-choice" data-choose-agent="${escapeHtml(key)}">
 							<img src="${escapeHtml(agent.icon)}" alt=""> ${escapeHtml(agent.title)}
 						</button>`;
 					})
 					.join("");
 				const forecasts = (message.forecasts || []).map(forecastCard).join("");
 				const comparisons = (message.comparisons || []).map(comparisonCard).join("");
-				const documentLink = message.href ? ` <button class="ng-doc-link" data-document-type="${escapeHtml(message.documentType)}" data-document-name="${escapeHtml(message.documentName)}">เปิดเอกสาร</button>` : "";
+				const documentLink = message.href ? ` <button type="button" class="ng-doc-link" data-document-type="${escapeHtml(message.documentType)}" data-document-name="${escapeHtml(message.documentName)}">${__("เปิดเอกสาร")}</button>` : "";
 				const contextual = contextualActions(message, index);
 				return `<div class="ng-message ng-${message.role} ${message.error ? "ng-error" : ""}" data-index="${index}">
-					<div class="ng-bubble">${message.pending && !message.content ? '<span class="ng-thinking">กำลังคิด</span>' : renderText(message.content)}${documentLink}</div>
+					<div class="ng-bubble">${message.pending && !message.content ? `<span class="ng-thinking">${__("กำลังคิด")}</span>` : renderText(message.content)}${documentLink}</div>
 					${forecasts}
 					${comparisons}
 					${message.action ? actionCard(message.action) : ""}
 					${contextual}
 					${suggestions ? `<div class="ng-suggestions">${suggestions}</div>` : ""}
 					${agentChoices ? `<div class="ng-suggestions ng-agent-choices">${agentChoices}</div>` : ""}
-					${message.error ? '<button data-retry="1" class="ng-retry">ลองอีกครั้ง</button>' : ""}
+					${message.error ? `<button type="button" data-retry="1" class="ng-retry">${__("ลองอีกครั้ง")}</button>` : ""}
 				</div>`;
 			})
 			.join("");
-		container.scrollTop = container.scrollHeight;
+		scrollToBottom(forceScroll);
+	}
+
+	function scrollToBottom(force = false) {
+		if (!force && !scrollPinned) return;
+		const container = document.getElementById("nextgen-chat-messages");
+		if (container) container.scrollTop = container.scrollHeight;
+	}
+
+	// Streaming deltas update only the pending bubble's content, batched once
+	// per animation frame — no full-list rebuilds, no scroll hijack, and screen
+	// readers are not asked to re-announce the whole log on every token.
+	function scheduleDeltaRender(pending) {
+		if (deltaRaf) return;
+		deltaRaf = window.requestAnimationFrame(() => {
+			deltaRaf = 0;
+			const container = document.getElementById("nextgen-chat-messages");
+			const bubble = container?.lastElementChild?.querySelector(".ng-bubble");
+			if (bubble && pending.content) bubble.innerHTML = renderText(pending.content);
+			scrollToBottom();
+		});
+	}
+
+	// Completed assistant replies are announced once through a dedicated polite
+	// region, instead of live-announcing every streaming fragment.
+	function announce(text) {
+		const region = document.getElementById("nextgen-chat-sr");
+		if (!region || !text) return;
+		region.textContent = "";
+		window.setTimeout(() => {
+			region.textContent = String(text).slice(0, 800);
+		}, 50);
 	}
 
 	async function handleMessageClick(event) {
@@ -789,28 +904,28 @@
 
 	function openSalesOrderDialog() {
 		if (!state.sessionId || state.agentKey !== "sales") {
-			frappe.msgprint("กรุณาเปิด AI Sales Copilot และเริ่มแชตก่อนค่ะ");
+			frappe.msgprint(__("กรุณาเปิด AI Sales Copilot และเริ่มแชตก่อนค่ะ"));
 			return;
 		}
 		const dialog = new frappe.ui.Dialog({
-			title: "สร้าง Sales Order Preview",
+			title: __("สร้าง Sales Order Preview"),
 			fields: [
 				{
 					fieldname: "customer",
 					fieldtype: "Link",
 					options: "Customer",
-					label: "ลูกค้า",
+					label: __("ลูกค้า"),
 					reqd: 1,
 				},
 				{
 					fieldname: "delivery_date",
 					fieldtype: "Date",
-					label: "วันที่ต้องการส่ง",
+					label: __("วันที่ต้องการส่ง"),
 				},
 				{
 					fieldname: "items",
 					fieldtype: "Table",
-					label: "สินค้า",
+					label: __("สินค้า"),
 					reqd: 1,
 					in_place_edit: true,
 					cannot_add_rows: false,
@@ -820,7 +935,7 @@
 							fieldname: "item",
 							fieldtype: "Link",
 							options: "Item",
-							label: "สินค้า",
+							label: __("สินค้า"),
 							in_list_view: 1,
 							reqd: 1,
 							get_query: () => ({ filters: { disabled: 0, is_sales_item: 1 } }),
@@ -828,7 +943,7 @@
 						{
 							fieldname: "qty",
 							fieldtype: "Float",
-							label: "จำนวน",
+							label: __("จำนวน"),
 							in_list_view: 1,
 							reqd: 1,
 						},
@@ -836,17 +951,17 @@
 							fieldname: "uom",
 							fieldtype: "Link",
 							options: "UOM",
-							label: "หน่วย",
+							label: __("หน่วย"),
 							in_list_view: 1,
 						},
 					],
 				},
 			],
-			primary_action_label: "ตรวจราคาและสร้าง Preview",
+			primary_action_label: __("ตรวจราคาและสร้าง Preview"),
 			primary_action: async (values) => {
 				const rows = (values.items || []).filter((row) => row.item && Number(row.qty) > 0);
 				if (!rows.length) {
-					frappe.msgprint("กรุณาเพิ่มสินค้าและจำนวนอย่างน้อย 1 รายการ");
+					frappe.msgprint(__("กรุณาเพิ่มสินค้าและจำนวนอย่างน้อย 1 รายการ"));
 					return;
 				}
 				const button = dialog.get_primary_btn();
@@ -862,13 +977,13 @@
 					state.actions.set(prepared.action_id, prepared);
 					state.messages.push({
 						role: "assistant",
-						content: "ตรวจราคา สต๊อก และข้อมูลลูกค้าจาก ERP แล้วค่ะ กรุณาตรวจ Preview ก่อนยืนยัน",
+						content: __("ตรวจราคา สต๊อก และข้อมูลลูกค้าจาก ERP แล้วค่ะ กรุณาตรวจ Preview ก่อนยืนยัน"),
 						action: prepared,
 					});
 					dialog.hide();
 					render();
 				} catch (error) {
-					frappe.msgprint(error?.message || "สร้าง Preview ไม่สำเร็จ");
+					frappe.msgprint(error?.message || __("สร้าง Preview ไม่สำเร็จ"));
 				} finally {
 					button.prop("disabled", false);
 				}
@@ -879,13 +994,13 @@
 
 	function openForecastDialog(itemCode = "") {
 		const dialog = new frappe.ui.Dialog({
-			title: "Generate Procurement Forecast",
+			title: __("Generate Procurement Forecast"),
 			fields: [
 				{
 					fieldname: "item",
 					fieldtype: "Link",
 					options: "Item",
-					label: "สินค้า (เว้นว่างเพื่อสร้างทุกสินค้า)",
+					label: __("สินค้า (เว้นว่างเพื่อสร้างทุกสินค้า)"),
 					default: itemCode || "",
 					get_query: () => ({ filters: { disabled: 0, is_stock_item: 1, is_purchase_item: 1 } }),
 				},
@@ -893,13 +1008,13 @@
 					fieldname: "warehouse",
 					fieldtype: "Link",
 					options: "Warehouse",
-					label: "คลัง (เว้นว่างเพื่อใช้คลังซื้อเริ่มต้น)",
+					label: __("คลัง (เว้นว่างเพื่อใช้คลังซื้อเริ่มต้น)"),
 					get_query: () => ({ filters: { disabled: 0, is_group: 0 } }),
 				},
-				{ fieldname: "horizon_days", fieldtype: "Int", label: "Horizon (Days)", default: 30, reqd: 1 },
-				{ fieldname: "limit", fieldtype: "Int", label: "จำนวนสินค้าสูงสุด", default: itemCode ? 1 : 50 },
+				{ fieldname: "horizon_days", fieldtype: "Int", label: __("Horizon (Days)"), default: 30, reqd: 1 },
+				{ fieldname: "limit", fieldtype: "Int", label: __("จำนวนสินค้าสูงสุด"), default: itemCode ? 1 : 50 },
 			],
-			primary_action_label: "Generate Forecast",
+			primary_action_label: __("Generate Forecast"),
 			primary_action: async (values) => {
 				const button = dialog.get_primary_btn();
 				button.prop("disabled", true);
@@ -913,21 +1028,24 @@
 							limit: values.item ? 1 : values.limit,
 						},
 						freeze: true,
-						freeze_message: "กำลังคำนวณ Forecast จากข้อมูล ERP...",
+						freeze_message: __("กำลังคำนวณ Forecast จากข้อมูล ERP..."),
 					});
 					const result = response.message || {};
 					dialog.hide();
 					state.messages.push({
 						role: "assistant",
-						content: `สร้าง Forecast Snapshot แล้ว ${result.generated || 0} รายการ${result.failed ? ` · ไม่สำเร็จ ${result.failed}` : ""} โดยยังไม่ได้สร้าง PO หรือ Material Request`,
+						content: __("สร้าง Forecast Snapshot แล้ว {0} รายการ{1} โดยยังไม่ได้สร้าง PO หรือ Material Request", [
+							result.generated || 0,
+							result.failed ? ` · ${__("ไม่สำเร็จ {0}", [result.failed])}` : "",
+						]),
 					});
 					frappe.show_alert({
-						message: `Generated ${result.generated || 0} forecast(s)`,
+						message: __(`Generated ${result.generated || 0} forecast(s)`),
 						indicator: result.failed ? "orange" : "green",
 					});
 					render();
 				} catch (error) {
-					frappe.msgprint(error?.message || "สร้าง Forecast ไม่สำเร็จ");
+					frappe.msgprint(error?.message || __("สร้าง Forecast ไม่สำเร็จ"));
 				} finally {
 					button.prop("disabled", false);
 				}
@@ -948,7 +1066,7 @@
 				fieldname: "warehouse",
 				fieldtype: "Link",
 				options: "Warehouse",
-				label: "คลังรับสินค้า",
+				label: __("คลังรับสินค้า"),
 				reqd: 1,
 				default: preview.warehouse,
 				get_query: () => ({
@@ -961,53 +1079,53 @@
 				fieldname: "supplier",
 				fieldtype: "Link",
 				options: "Supplier",
-				label: "Supplier",
+				label: __("Supplier"),
 				reqd: 1,
 				default: preview.supplier,
 			});
 			fields.push({
 				fieldname: "priority",
 				fieldtype: "Select",
-				label: "ความเร่งด่วน",
+				label: __("ความเร่งด่วน"),
 				options: [
-					{ label: "ปกติ (สมดุลราคา/ความเร็ว)", value: "balanced" },
-					{ label: "ด่วน (เน้นเร็ว)", value: "urgent" },
-					{ label: "เน้นราคาถูก", value: "best_price" },
+					{ label: __("ปกติ (สมดุลราคา/ความเร็ว)"), value: "balanced" },
+					{ label: __("ด่วน (เน้นเร็ว)"), value: "urgent" },
+					{ label: __("เน้นราคาถูก"), value: "best_price" },
 				],
 				default: originalPriority,
-				description: "เปลี่ยนแล้วระบบจะจัดวันรับของและคำเตือนใหม่ตามลำดับความสำคัญ",
+				description: __("เปลี่ยนแล้วระบบจะจัดวันรับของและคำเตือนใหม่ตามลำดับความสำคัญ"),
 			});
 		}
 		fields.push({
 			fieldname: "schedule_date",
 			fieldtype: "Date",
-			label: "กำหนดรับของ",
+			label: __("กำหนดรับของ"),
 			reqd: 1,
 			default: preview.schedule_date,
 		});
 		if (lines.length) {
-			fields.push({ fieldname: "sb_items", fieldtype: "Section Break", label: "รายการสินค้า" });
+			fields.push({ fieldname: "sb_items", fieldtype: "Section Break", label: __("รายการสินค้า") });
 			lines.forEach((line, index) => {
 				fields.push({
 					fieldname: `qty__${index}`,
 					fieldtype: "Float",
-					label: `จำนวน: ${line.item_name || line.item_code} (${line.uom || ""})`,
+					label: __("จำนวน: {0} ({1})", [line.item_name || line.item_code, line.uom || ""]),
 					reqd: 1,
 					default: line.qty,
 				});
 				fields.push({
 					fieldname: `rate__${index}`,
 					fieldtype: "Currency",
-					label: `ราคา/หน่วย: ${line.item_code}${line.rate_overridden ? " (กำหนดเองอยู่)" : ""}`,
+					label: __("ราคา/หน่วย: {0}{1}", [line.item_code, line.rate_overridden ? ` ${__("(กำหนดเองอยู่)")}` : ""]),
 					default: line.rate,
-					description: "แก้เฉพาะเมื่อตกลงราคากับ supplier เอง ระบบจะบันทึกว่าเป็นราคากำหนดเอง",
+					description: __("แก้เฉพาะเมื่อตกลงราคากับ supplier เอง ระบบจะบันทึกว่าเป็นราคากำหนดเอง"),
 				});
 			});
 		}
 		const dialog = new frappe.ui.Dialog({
-			title: "แก้ไข Procurement Preview",
+			title: __("แก้ไข Procurement Preview"),
 			fields,
-			primary_action_label: "อัปเดต Preview",
+			primary_action_label: __("อัปเดต Preview"),
 			primary_action: async (values) => {
 				// Send only what actually changed so an untouched supplier/priority
 				// keeps the server free to re-rank, and untouched rates stay system rates.
@@ -1043,10 +1161,10 @@
 					});
 					applyActionReplacement(actionId, replacement);
 					dialog.hide();
-					setStatus("อัปเดต Preview จากข้อมูล ERP แล้ว โดยไม่เรียก AI ใหม่");
-					frappe.show_alert({ message: "อัปเดต Preview แล้ว", indicator: "green" });
+					setStatus(__("อัปเดต Preview จากข้อมูล ERP แล้ว โดยไม่เรียก AI ใหม่"));
+					frappe.show_alert({ message: __("อัปเดต Preview แล้ว"), indicator: "green" });
 				} catch (error) {
-					frappe.msgprint(error?.message || "อัปเดต Preview ไม่สำเร็จ");
+					frappe.msgprint(error?.message || __("อัปเดต Preview ไม่สำเร็จ"));
 				} finally {
 					primary.prop("disabled", false);
 				}
@@ -1068,7 +1186,7 @@
 			action.result_name = result.document_name;
 			const serverMessage = result.result?.message;
 			const label = serverMessage
-				|| (result.high_confidence ? "สร้างและจองสต๊อกสำเร็จ" : "ส่งเข้าคิวตรวจสอบแล้ว");
+				|| (result.high_confidence ? __("สร้างและจองสต๊อกสำเร็จ") : __("ส่งเข้าคิวตรวจสอบแล้ว"));
 			state.messages.push({
 				role: "assistant",
 				content: `${label}: ${result.document_name}`,
@@ -1079,7 +1197,7 @@
 			frappe.show_alert({ message: label, indicator: "green" });
 		} catch (error) {
 			action.status = "Pending";
-			frappe.msgprint(error?.message || "ดำเนินการไม่สำเร็จ");
+			frappe.msgprint(error?.message || __("ดำเนินการไม่สำเร็จ"));
 		}
 		render();
 	}
@@ -1112,15 +1230,15 @@
 			}
 			state.messages.push({
 				role: "assistant",
-				content: `สร้าง ${result.document_type} แล้ว: ${result.document_name}`,
+				content: __("สร้าง {0} แล้ว: {1}", [result.document_type, result.document_name]),
 				href: true,
 				documentType: result.document_type,
 				documentName: result.document_name,
 			});
-			frappe.show_alert({ message: "สร้างเอกสารสำเร็จ", indicator: "green" });
+			frappe.show_alert({ message: __("สร้างเอกสารสำเร็จ"), indicator: "green" });
 		} catch (error) {
 			if (action) action.status = "Pending Approval";
-			frappe.msgprint(error?.message || "อนุมัติไม่สำเร็จ");
+			frappe.msgprint(error?.message || __("อนุมัติไม่สำเร็จ"));
 		}
 		render();
 	}
@@ -1135,7 +1253,7 @@
 			if (action) action.status = "Rejected";
 			render();
 		} catch (error) {
-			frappe.msgprint(error?.message || "ปฏิเสธไม่สำเร็จ");
+			frappe.msgprint(error?.message || __("ปฏิเสธไม่สำเร็จ"));
 		}
 	}
 
@@ -1146,7 +1264,7 @@
 			if (action) action.status = "Cancelled";
 			render();
 		} catch (error) {
-			frappe.msgprint(error?.message || "ยกเลิกไม่สำเร็จ");
+			frappe.msgprint(error?.message || __("ยกเลิกไม่สำเร็จ"));
 		}
 	}
 
@@ -1158,17 +1276,17 @@
 		const panel = document.getElementById("nextgen-chat-history");
 		panel.hidden = !panel.hidden;
 		if (!panel.hidden) {
-			panel.innerHTML = '<div class="ng-history-loading">กำลังโหลด...</div>';
+			panel.innerHTML = `<div class="ng-history-loading">${__("กำลังโหลด...")}</div>`;
 			try {
 				const sessions = await call("list_sessions");
 				const relevant = sessions.filter(
 					(session) => !state.agentKey || (session.agent_type || "sales") === state.agentKey,
 				);
 				panel.innerHTML = relevant.length
-					? relevant.map((session) => `<button data-session="${escapeHtml(session.name)}"><strong>${escapeHtml(session.title)}</strong><small>${escapeHtml(session.last_activity_at)}</small></button>`).join("")
-					: '<div class="ng-history-loading">ยังไม่มีประวัติของผู้ช่วยนี้</div>';
+					? relevant.map((session) => `<button type="button" data-session="${escapeHtml(session.name)}"><strong>${escapeHtml(session.title)}</strong><small>${escapeHtml(session.last_activity_at)}</small></button>`).join("")
+					: `<div class="ng-history-loading">${__("ยังไม่มีประวัติของผู้ช่วยนี้")}</div>`;
 			} catch (error) {
-				panel.innerHTML = `<div class="ng-history-loading">${escapeHtml(error?.message || "โหลดไม่สำเร็จ")}</div>`;
+				panel.innerHTML = `<div class="ng-history-loading">${escapeHtml(error?.message || __("โหลดไม่สำเร็จ"))}</div>`;
 			}
 		}
 	}
@@ -1202,8 +1320,8 @@
 				action: message.action ? state.actions.get(message.action) : null,
 			}));
 			document.getElementById("nextgen-chat-history").hidden = true;
-			render();
-			if (notify) frappe.show_alert({ message: "เปิดประวัติแชตแล้ว", indicator: "blue" });
+			render({ forceScroll: true });
+			if (notify) frappe.show_alert({ message: __("เปิดประวัติแชตแล้ว"), indicator: "blue" });
 		} catch {
 			if (state.sessionId === sessionId) {
 				window.localStorage.removeItem(sessionStorageKey(state.agentKey));

@@ -9,9 +9,26 @@ frappe.ui.form.on("AI Order Intake", {
 		if (frm.is_new()) return;
 		const status = frm.doc.status;
 
+		const success_message = (method, args) => {
+			const messages = {
+				approve_ai_order_intake: () => __("อนุมัติออเดอร์แล้ว กำลังส่งให้ลูกค้ายืนยัน"),
+				record_customer_confirmation: () =>
+					args.confirmed
+						? __("ลูกค้ายืนยันแล้ว สร้าง Sales Order และจองสต็อกเรียบร้อย")
+						: __("บันทึกการปฏิเสธแล้ว"),
+				progress_delivery: () => __("สร้างใบแจ้งหนี้เรียบร้อย"),
+				progress_payment: () => __("บันทึกการชำระเงินเรียบร้อย"),
+				approve_payment_slip: () => __("อนุมัติสลิปการชำระเงินแล้ว"),
+				reject_payment_slip: () => __("ปฏิเสธสลิปแล้ว แจ้งลูกค้าผ่าน LINE"),
+				complete_delivery: () => __("บันทึกการจัดส่งเรียบร้อย"),
+			};
+			return (messages[method] || (() => __("Done")))();
+		};
+
 		const call = (method, args, msg) => {
 			frappe.call({ method: `nextgen_erp.api.${method}`, args, freeze: true, freeze_message: msg }).then((r) => {
-				frappe.show_alert({ message: __("Done: {0}", [JSON.stringify(r.message)]), indicator: "green" });
+				console.debug(`AI Order Intake · ${method}`, r.message);
+				frappe.show_alert({ message: success_message(method, args), indicator: "green" });
 				frm.reload_doc();
 			});
 		};

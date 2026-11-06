@@ -259,6 +259,48 @@ class FrappeGatewayClient:
         context = self._call("create_node_run", payload, correlation_id=correlation_id)
         return contracts.validate("run_context", context)
 
+    def execute_node(
+        self,
+        *,
+        parent_run_id: str,
+        node_id: str,
+        idempotency_key: str,
+        correlation_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Ask Frappe to execute one deterministic workflow node.
+
+        Only the node's *identity* is sent. Frappe reads its configuration from
+        the stored graph and its inputs from the outputs it already persisted,
+        so the runtime cannot choose a URL, a query, a file or an upstream
+        payload — none of which it could reach on its own in any case.
+        """
+        payload = contracts.validate(
+            "execute_node_request",
+            {
+                "contract_version": contracts.CONTRACT_VERSION,
+                "parent_run_id": parent_run_id,
+                "node_id": node_id,
+                "idempotency_key": idempotency_key,
+            },
+        )
+        result = self._call("execute_node", payload, correlation_id=correlation_id)
+        return contracts.validate("node_result", result)
+
+    def get_workflow_state(
+        self, *, parent_run_id: str, correlation_id: str | None = None
+    ) -> dict[str, Any]:
+        """What the graph has already achieved, as Frappe recorded it.
+
+        A workflow that parked for an approval resumes in a different process,
+        so the outputs of earlier nodes are read back rather than remembered.
+        """
+        payload = contracts.validate(
+            "workflow_state_request",
+            {"contract_version": contracts.CONTRACT_VERSION, "parent_run_id": parent_run_id},
+        )
+        state = self._call("get_workflow_state", payload, correlation_id=correlation_id)
+        return contracts.validate("workflow_state", state)
+
     def complete_run(
         self,
         *,
