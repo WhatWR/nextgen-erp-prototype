@@ -1,0 +1,13 @@
+{
+ "doctype": "Page",
+ "module": "NextGen ERP",
+ "name": "po-email-intake",
+ "page_name": "po-email-intake",
+ "standard": "Yes",
+ "title": "PO Email Intake",
+ "roles": [
+  {"role": "System Manager"},
+  {"role": "Purchase Manager"},
+  {"role": "Purchase User"}
+ ]
+}

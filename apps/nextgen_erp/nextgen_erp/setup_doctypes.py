@@ -53,8 +53,9 @@ def _procurement_workspace():
         {"id": "hdr", "type": "header", "data": {"text": '<span class="h4">AI Procurement Copilot</span>', "col": 12}},
         {"id": "sc1", "type": "shortcut", "data": {"shortcut_name": "Procurement Recommendations", "col": 3}},
         {"id": "sc2", "type": "shortcut", "data": {"shortcut_name": "Forecast Snapshots", "col": 3}},
-        {"id": "sc3", "type": "shortcut", "data": {"shortcut_name": "Purchase Orders", "col": 3}},
-        {"id": "sc4", "type": "shortcut", "data": {"shortcut_name": "Procurement Automation Settings", "col": 3}},
+        {"id": "sc3", "type": "shortcut", "data": {"shortcut_name": "PO Email Intake", "col": 3}},
+        {"id": "sc4", "type": "shortcut", "data": {"shortcut_name": "Purchase Orders", "col": 3}},
+        {"id": "sc5", "type": "shortcut", "data": {"shortcut_name": "Procurement Automation Settings", "col": 3}},
     ]
     frappe.get_doc(
         {
@@ -69,6 +70,7 @@ def _procurement_workspace():
             "shortcuts": [
                 {"label": "Procurement Recommendations", "link_to": "NextGen Procurement Recommendation", "type": "DocType", "color": "Orange"},
                 {"label": "Forecast Snapshots", "link_to": "NextGen Procurement Forecast", "type": "DocType", "color": "Green"},
+                {"label": "PO Email Intake", "link_to": "po-email-intake", "type": "Page", "color": "Teal"},
                 {"label": "Purchase Orders", "link_to": "Purchase Order", "type": "DocType", "color": "Blue"},
                 {"label": "Procurement Automation Settings", "link_to": "NextGen Procurement Settings", "type": "DocType", "color": "Grey"},
             ],
@@ -76,6 +78,9 @@ def _procurement_workspace():
                 {"label": "Procurement Dashboard", "type": "Card Break"},
                 {"label": "Procurement Recommendations", "link_to": "NextGen Procurement Recommendation", "link_type": "DocType", "type": "Link"},
                 {"label": "Forecast Snapshots", "link_to": "NextGen Procurement Forecast", "link_type": "DocType", "type": "Link"},
+                {"label": "PO Email Intake", "link_to": "po-email-intake", "link_type": "Page", "type": "Link"},
+                {"label": "PO Email Rules", "link_to": "NextGen PO Email Rule", "link_type": "DocType", "type": "Link"},
+                {"label": "PO Email Queue", "link_to": "NextGen PO Email Intake", "link_type": "DocType", "type": "Link"},
                 {"label": "Buying Documents", "type": "Card Break"},
                 {"label": "Material Requests", "link_to": "Material Request", "link_type": "DocType", "type": "Link"},
                 {"label": "Purchase Orders", "link_to": "Purchase Order", "link_type": "DocType", "type": "Link"},
@@ -84,6 +89,7 @@ def _procurement_workspace():
                 {"label": "Settings", "type": "Card Break"},
                 {"label": "Buying Settings", "link_to": "Buying Settings", "link_type": "DocType", "type": "Link"},
                 {"label": "Procurement Automation Settings", "link_to": "NextGen Procurement Settings", "link_type": "DocType", "type": "Link"},
+                {"label": "PO Email Settings", "link_to": "NextGen PO Email Settings", "link_type": "DocType", "type": "Link"},
                 {"label": "AI Assistant Settings", "link_to": "NextGen AI Settings", "link_type": "DocType", "type": "Link"},
             ],
         }
@@ -148,15 +154,17 @@ def _desk_tile():
             "header_icon": "buying",
             "items": [
                 {"type": "Link", "label": PROCUREMENT_WORKSPACE, "link_type": "Workspace", "link_to": PROCUREMENT_WORKSPACE, "icon": "buying", "idx": 1},
-                {"type": "Link", "label": "Procurement Recommendations", "link_type": "DocType", "link_to": "NextGen Procurement Recommendation", "icon": "lightbulb", "idx": 2},
-                {"type": "Link", "label": "Forecast Snapshots", "link_type": "DocType", "link_to": "NextGen Procurement Forecast", "icon": "chart", "idx": 3},
-                {"type": "Link", "label": "Material Requests", "link_type": "DocType", "link_to": "Material Request", "icon": "notepad-text", "idx": 4},
-                {"type": "Link", "label": "Purchase Orders", "link_type": "DocType", "link_to": "Purchase Order", "icon": "receipt-text", "idx": 5},
-                {"type": "Link", "label": "Suppliers", "link_type": "DocType", "link_to": "Supplier", "icon": "users-round", "idx": 6},
-                {"type": "Link", "label": "Supplier Quotations", "link_type": "DocType", "link_to": "Supplier Quotation", "icon": "book-open-text", "idx": 7},
-                {"type": "Link", "label": "Buying Settings", "link_type": "DocType", "link_to": "Buying Settings", "icon": "buying", "idx": 8},
-                {"type": "Link", "label": "Procurement Automation Settings", "link_type": "DocType", "link_to": "NextGen Procurement Settings", "icon": "repeat-2", "idx": 9},
-                {"type": "Link", "label": "AI Assistant Settings", "link_type": "DocType", "link_to": "NextGen AI Settings", "icon": "user-cog", "idx": 10},
+                {"type": "Link", "label": "PO Email Intake", "link_type": "Page", "link_to": "po-email-intake", "icon": "mail", "idx": 2},
+                {"type": "Link", "label": "Procurement Recommendations", "link_type": "DocType", "link_to": "NextGen Procurement Recommendation", "icon": "lightbulb", "idx": 3},
+                {"type": "Link", "label": "Forecast Snapshots", "link_type": "DocType", "link_to": "NextGen Procurement Forecast", "icon": "chart", "idx": 4},
+                {"type": "Link", "label": "Material Requests", "link_type": "DocType", "link_to": "Material Request", "icon": "notepad-text", "idx": 5},
+                {"type": "Link", "label": "Purchase Orders", "link_type": "DocType", "link_to": "Purchase Order", "icon": "receipt-text", "idx": 6},
+                {"type": "Link", "label": "Suppliers", "link_type": "DocType", "link_to": "Supplier", "icon": "users-round", "idx": 7},
+                {"type": "Link", "label": "Supplier Quotations", "link_type": "DocType", "link_to": "Supplier Quotation", "icon": "book-open-text", "idx": 8},
+                {"type": "Link", "label": "Buying Settings", "link_type": "DocType", "link_to": "Buying Settings", "icon": "buying", "idx": 9},
+                {"type": "Link", "label": "Procurement Automation Settings", "link_type": "DocType", "link_to": "NextGen Procurement Settings", "icon": "repeat-2", "idx": 10},
+                {"type": "Link", "label": "PO Email Settings", "link_type": "DocType", "link_to": "NextGen PO Email Settings", "icon": "mail", "idx": 11},
+                {"type": "Link", "label": "AI Assistant Settings", "link_type": "DocType", "link_to": "NextGen AI Settings", "icon": "user-cog", "idx": 12},
             ],
         }
     )

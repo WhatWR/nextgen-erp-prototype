@@ -200,6 +200,9 @@ scheduler_events = {
 	# must leave an observable, recoverable state rather than a stuck run.
 	"cron": {
 		"*/5 * * * *": ["nextgen_erp.agent_gateway.dispatch.maintenance"],
+		# PO email mailbox poll. No-ops when disabled; falls back to fixtures
+		# when OAuth / IMAP secrets are missing.
+		"*/15 * * * *": ["nextgen_erp.purchase_email.tasks.poll_mailbox"],
 	},
 }
 

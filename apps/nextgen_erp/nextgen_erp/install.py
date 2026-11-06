@@ -36,6 +36,20 @@ def _ensure_agent_gateway() -> None:
 		)
 
 
+def _ensure_po_email_defaults() -> None:
+	"""Seed Excel-parity validation rules for PO email intake. Soft-fail."""
+	try:
+		if not frappe.db.exists("DocType", "NextGen PO Email Rule"):
+			return
+		from nextgen_erp.purchase_email.pipeline import ensure_default_rules
+
+		ensure_default_rules()
+	except Exception:
+		frappe.log_error(
+			title="NextGen PO email defaults", message=frappe.get_traceback()
+		)
+
+
 def _ensure_custom_fields() -> None:
 	reference_field = {
 		"fieldname": "custom_nextgen_external_reference",
@@ -194,6 +208,7 @@ def after_install() -> None:
 
 	ensure_website_theme()
 	_ensure_agent_gateway()
+	_ensure_po_email_defaults()
 
 
 def after_migrate() -> None:
@@ -220,3 +235,4 @@ def after_migrate() -> None:
 
 	ensure_website_theme()
 	_ensure_agent_gateway()
+	_ensure_po_email_defaults()

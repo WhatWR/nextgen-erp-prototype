@@ -1,0 +1,273 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "autoname": "POEM-.#####",
+ "creation": "2026-11-06 00:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "section_source",
+  "source_message_id",
+  "from_email",
+  "subject",
+  "column_break_source",
+  "received_at",
+  "provider",
+  "status",
+  "section_extracted",
+  "vendor_name",
+  "supplier",
+  "po_reference",
+  "column_break_extracted",
+  "currency",
+  "total_amount",
+  "confidence",
+  "rule_decision",
+  "section_body",
+  "raw_body",
+  "extracted_json",
+  "section_items",
+  "items",
+  "section_rules",
+  "rule_summary",
+  "rule_results",
+  "section_review",
+  "reviewer",
+  "decision_note",
+  "column_break_review",
+  "purchase_order",
+  "exported_at"
+ ],
+ "fields": [
+  {
+   "fieldname": "section_source",
+   "fieldtype": "Section Break",
+   "label": "Source Email"
+  },
+  {
+   "fieldname": "source_message_id",
+   "fieldtype": "Data",
+   "label": "Source Message ID",
+   "reqd": 1,
+   "unique": 1
+  },
+  {
+   "fieldname": "from_email",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "From",
+   "options": "Email"
+  },
+  {
+   "fieldname": "subject",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Subject"
+  },
+  {
+   "fieldname": "column_break_source",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "received_at",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Received At"
+  },
+  {
+   "default": "Mock",
+   "fieldname": "provider",
+   "fieldtype": "Select",
+   "label": "Provider",
+   "options": "Mock\nGmail\nMicrosoft\nIMAP"
+  },
+  {
+   "default": "Needs Review",
+   "fieldname": "status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "in_standard_filter": 1,
+   "label": "Status",
+   "options": "Draft\nNeeds Review\nFlagged\nApproved\nRejected\nExported",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_extracted",
+   "fieldtype": "Section Break",
+   "label": "Extracted Order"
+  },
+  {
+   "fieldname": "vendor_name",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Vendor Name"
+  },
+  {
+   "fieldname": "supplier",
+   "fieldtype": "Link",
+   "label": "Supplier",
+   "options": "Supplier"
+  },
+  {
+   "fieldname": "po_reference",
+   "fieldtype": "Data",
+   "label": "PO / Quote Reference"
+  },
+  {
+   "fieldname": "column_break_extracted",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "THB",
+   "fieldname": "currency",
+   "fieldtype": "Data",
+   "label": "Currency"
+  },
+  {
+   "fieldname": "total_amount",
+   "fieldtype": "Currency",
+   "in_list_view": 1,
+   "label": "Total Amount"
+  },
+  {
+   "fieldname": "confidence",
+   "fieldtype": "Float",
+   "label": "Extraction Confidence"
+  },
+  {
+   "fieldname": "rule_decision",
+   "fieldtype": "Select",
+   "in_standard_filter": 1,
+   "label": "Rule Decision",
+   "options": "\nApprove\nReject\nFlag\nNeeds Review",
+   "read_only": 1
+  },
+  {
+   "fieldname": "section_body",
+   "fieldtype": "Section Break",
+   "label": "Raw / Extracted Payload"
+  },
+  {
+   "fieldname": "raw_body",
+   "fieldtype": "Long Text",
+   "label": "Email Body"
+  },
+  {
+   "fieldname": "extracted_json",
+   "fieldtype": "Code",
+   "label": "Extracted JSON",
+   "options": "JSON"
+  },
+  {
+   "fieldname": "section_items",
+   "fieldtype": "Section Break",
+   "label": "Line Items"
+  },
+  {
+   "fieldname": "items",
+   "fieldtype": "Table",
+   "label": "Items",
+   "options": "NextGen PO Email Intake Item"
+  },
+  {
+   "fieldname": "section_rules",
+   "fieldtype": "Section Break",
+   "label": "Rule Evaluation"
+  },
+  {
+   "fieldname": "rule_summary",
+   "fieldtype": "Small Text",
+   "label": "Rule Summary"
+  },
+  {
+   "fieldname": "rule_results",
+   "fieldtype": "Table",
+   "label": "Rule Results",
+   "options": "NextGen PO Email Rule Result"
+  },
+  {
+   "fieldname": "section_review",
+   "fieldtype": "Section Break",
+   "label": "Human Review"
+  },
+  {
+   "fieldname": "reviewer",
+   "fieldtype": "Data",
+   "label": "Reviewer",
+   "read_only": 1
+  },
+  {
+   "fieldname": "decision_note",
+   "fieldtype": "Small Text",
+   "label": "Decision Note"
+  },
+  {
+   "fieldname": "column_break_review",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "purchase_order",
+   "fieldtype": "Link",
+   "label": "Purchase Order",
+   "options": "Purchase Order",
+   "read_only": 1
+  },
+  {
+   "fieldname": "exported_at",
+   "fieldtype": "Datetime",
+   "label": "Exported At",
+   "read_only": 1
+  }
+ ],
+ "links": [],
+ "modified": "2026-11-06 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "NextGen ERP",
+ "name": "NextGen PO Email Intake",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Purchase Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "export": 1,
+   "print": 1,
+   "read": 1,
+   "report": 1,
+   "role": "Purchase User",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "title_field": "subject",
+ "track_changes": 1
+}

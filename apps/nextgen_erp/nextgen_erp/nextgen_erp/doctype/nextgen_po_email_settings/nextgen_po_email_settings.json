@@ -1,0 +1,218 @@
+{
+ "actions": [],
+ "creation": "2026-11-06 00:00:00.000000",
+ "doctype": "DocType",
+ "engine": "InnoDB",
+ "field_order": [
+  "enabled",
+  "provider",
+  "use_mock_fixtures",
+  "column_break_status",
+  "connection_status",
+  "mailbox_email",
+  "watch_folder",
+  "company",
+  "section_oauth",
+  "oauth_client_id",
+  "oauth_client_secret",
+  "column_break_oauth",
+  "oauth_refresh_token",
+  "oauth_tenant_id",
+  "section_imap",
+  "imap_host",
+  "imap_port",
+  "column_break_imap",
+  "imap_username",
+  "imap_password",
+  "imap_use_ssl",
+  "section_sync",
+  "last_sync_at",
+  "last_sync_note"
+ ],
+ "fields": [
+  {
+   "default": "1",
+   "description": "Watch the connected mailbox for purchase-order emails.",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enable PO Email Intake"
+  },
+  {
+   "default": "Mock",
+   "description": "Mock uses built-in fixtures (no secrets). Gmail/Microsoft/IMAP need OAuth or credentials.",
+   "fieldname": "provider",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Provider",
+   "options": "Mock\nGmail\nMicrosoft\nIMAP",
+   "reqd": 1
+  },
+  {
+   "default": "1",
+   "description": "When on, Sync Inbox loads fixture emails instead of calling the live provider.",
+   "fieldname": "use_mock_fixtures",
+   "fieldtype": "Check",
+   "label": "Use Mock Fixtures"
+  },
+  {
+   "fieldname": "column_break_status",
+   "fieldtype": "Column Break"
+  },
+  {
+   "default": "Not Connected",
+   "fieldname": "connection_status",
+   "fieldtype": "Select",
+   "in_list_view": 1,
+   "label": "Connection Status",
+   "options": "Not Connected\nConnected\nError\nNeeds Auth",
+   "read_only": 1
+  },
+  {
+   "fieldname": "mailbox_email",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Mailbox Email",
+   "options": "Email"
+  },
+  {
+   "default": "INBOX/Purchase Orders",
+   "description": "Gmail label, Microsoft folder, or IMAP mailbox path to watch.",
+   "fieldname": "watch_folder",
+   "fieldtype": "Data",
+   "label": "Watch Folder / Label"
+  },
+  {
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "section_oauth",
+   "fieldtype": "Section Break",
+   "label": "OAuth (Gmail / Microsoft)"
+  },
+  {
+   "fieldname": "oauth_client_id",
+   "fieldtype": "Data",
+   "label": "OAuth Client ID"
+  },
+  {
+   "fieldname": "oauth_client_secret",
+   "fieldtype": "Password",
+   "label": "OAuth Client Secret"
+  },
+  {
+   "fieldname": "column_break_oauth",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "oauth_refresh_token",
+   "fieldtype": "Password",
+   "label": "OAuth Refresh Token"
+  },
+  {
+   "default": "common",
+   "description": "Azure AD tenant id for Microsoft Graph. Use common for multi-tenant apps.",
+   "fieldname": "oauth_tenant_id",
+   "fieldtype": "Data",
+   "label": "Microsoft Tenant ID"
+  },
+  {
+   "fieldname": "section_imap",
+   "fieldtype": "Section Break",
+   "label": "IMAP"
+  },
+  {
+   "fieldname": "imap_host",
+   "fieldtype": "Data",
+   "label": "IMAP Host"
+  },
+  {
+   "default": "993",
+   "fieldname": "imap_port",
+   "fieldtype": "Int",
+   "label": "IMAP Port"
+  },
+  {
+   "fieldname": "column_break_imap",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "imap_username",
+   "fieldtype": "Data",
+   "label": "IMAP Username"
+  },
+  {
+   "fieldname": "imap_password",
+   "fieldtype": "Password",
+   "label": "IMAP Password"
+  },
+  {
+   "default": "1",
+   "fieldname": "imap_use_ssl",
+   "fieldtype": "Check",
+   "label": "Use SSL"
+  },
+  {
+   "fieldname": "section_sync",
+   "fieldtype": "Section Break",
+   "label": "Sync"
+  },
+  {
+   "fieldname": "last_sync_at",
+   "fieldtype": "Datetime",
+   "label": "Last Sync At",
+   "read_only": 1
+  },
+  {
+   "fieldname": "last_sync_note",
+   "fieldtype": "Small Text",
+   "label": "Last Sync Note",
+   "read_only": 1
+  }
+ ],
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-11-06 00:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "NextGen ERP",
+ "name": "NextGen PO Email Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "delete": 0,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Purchase Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 0,
+   "delete": 0,
+   "email": 0,
+   "print": 1,
+   "read": 1,
+   "role": "Purchase User",
+   "share": 0,
+   "write": 0
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
