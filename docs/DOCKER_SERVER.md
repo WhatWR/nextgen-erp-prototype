@@ -1,14 +1,16 @@
 # Deploy NextGen ERP with Docker Compose
 
 > **Document status:** Current deployment and operations guide. Target platform decisions are maintained in the [canonical AI handoff](AI_HANDOFF/README.md).
+>
+> **Prefer Podman?** Use the short guides [start-local.md](start-local.md) and [deployment.md](deployment.md) (`podman compose`, no shell-script wrappers). This page keeps the longer Docker Compose reference.
 
 This stack is intended for a single Linux server. It runs ERPNext, Frappe CRM,
 Frappe HRMS (HR and Payroll), the NextGen Frappe app, MariaDB, Redis, workers,
 scheduler, websocket, LINE order intake and Caddy HTTPS. Only ports 80 and 443
 are public.
 
-For local development where ERPNext runs from the Bench source tree but MariaDB
-and Redis run in Docker, use `./scripts/start-local.sh` instead.
+For a full local containerized site, follow [start-local.md](start-local.md).
+(Bench + `compose.local-infra.yaml` remains available for source-tree development.)
 
 ## Server requirements
 
@@ -145,7 +147,10 @@ Do not enable `ENABLE_LEGACY_PROTOTYPE` on the server.
 
 ```bash
 # Pull the current branch, build, migrate and deploy
-./scripts/deploy.sh
+# Prefer: see deployment.md (podman compose). Equivalent docker form:
+git pull --ff-only
+docker compose -p nextgen-erp build --pull
+docker compose -p nextgen-erp up -d --remove-orphans
 
 # Status
 docker compose ps

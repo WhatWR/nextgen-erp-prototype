@@ -42,30 +42,22 @@ a time-limited invoice link are delivered through LINE.
 
 ## Start locally
 
-1. Copy `.env.example` to `.env` and add the API credentials for the dedicated
-   `nextgen-order-service@local.invalid` ERPNext user. Generate its key and secret
-   in ERPNext; do not use the Administrator account.
-2. Run `./scripts/start.sh`.
-3. Open [ERPNext Desk](http://127.0.0.1:8000) and select **NextGen Orders**.
+Prefer **Podman Compose** for the full site (no shell-script wrappers):
+
+1. Copy `.env.server.example` → `.env.server` and replace every `CHANGE_ME`.
+2. Follow [docs/start-local.md](docs/start-local.md) (`podman compose -p nextgen-erp up -d`).
+3. Open [ERPNext Desk](http://127.0.0.1:8180) as `Administrator`.
 
 Configure the LINE channel secret/token and the public HTTPS webhook URL in the
 **LINE Channel Settings** DocType. Map each LINE user to an ERPNext Customer with
 **LINE Customer Map** before accepting live orders.
 
-See [the deployment and integration guide](docs/ERPNEXT_MIGRATION.md) for setup,
-security boundaries and test commands.
-
-For a Linux server, use the default [compose.yaml](compose.yaml), which loads
-[compose.server.yaml](compose.server.yaml) with `.env.server`, and follow the
-[Docker server deployment guide](docs/DOCKER_SERVER.md).
+Server rollout: [docs/deployment.md](docs/deployment.md). Longer Compose notes remain in
+[docs/DOCKER_SERVER.md](docs/DOCKER_SERVER.md). Migration and security boundaries:
+[docs/ERPNEXT_MIGRATION.md](docs/ERPNEXT_MIGRATION.md).
 
 To rehearse the whole flow locally without real LINE, LLM or slip-verifier
-accounts, run the [sandbox simulator](docs/SANDBOX.md)
-(`python3 scripts/sandbox.py`).
-
-For local development with Dockerized MariaDB and Redis, run
-`./scripts/start-local.sh`. ERPNext remains editable in the local Bench while its
-infrastructure is isolated in `compose.local-infra.yaml`.
+accounts, see the [sandbox simulator](docs/SANDBOX.md).
 
 For a fresh clone, initialize the pinned upstreams and apply the tracked local
 changes:

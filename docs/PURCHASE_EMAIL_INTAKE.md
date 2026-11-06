@@ -20,12 +20,20 @@ Entry point: Desk page **PO Email Intake** (`/app/po-email-intake`), also linked
 
 Providers: **Mock** (fixtures), **Gmail**, **Microsoft**, **IMAP**. Live list APIs are stubbed until OAuth/IMAP secrets are configured; Sync falls back to fixtures so demos stay end-to-end.
 
-## Demo without secrets
+## Demo on the Podman site
 
-1. `bench --site <site> migrate`
-2. Open `/app/po-email-intake`
-3. Keep **Use mock fixtures** enabled → **Sync Inbox**
-4. Approve / reject / flag rows, then **Export Draft PO** when Supplier + Items exist
+Follow [start-local.md](start-local.md), then:
+
+```bash
+podman compose -p nextgen-erp exec backend \
+  bench --site nextgen.localhost migrate
+```
+
+1. Open `http://127.0.0.1:8180` → `/app/po-email-intake`
+2. Keep **Use mock fixtures** enabled → **Sync Inbox**
+3. Approve / reject / flag rows, then **Export Draft PO** when Supplier + Items exist
+
+Server rollout: [deployment.md](deployment.md).
 
 ## Tests
 
